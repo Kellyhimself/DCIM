@@ -1,0 +1,5 @@
+This directory contains Alembic migration environment and versions.
+Run migrations from repo root:
+  cd backend
+  alembic -c alembic.ini revision --autogenerate -m "message"
+  alembic -c alembic.ini upgrade head

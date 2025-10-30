@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+.env.*
+.eggs/
+*.egg-info/
+
+# Node/General
+node_modules/
+
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+build/
+android/.gradle/
+ios/Pods/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data/Media
+media/
+.tmp/
+
+# Docker
+**/dist/
+**/.pytest_cache/
+**/.mypy_cache/
