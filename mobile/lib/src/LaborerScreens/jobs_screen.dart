@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 
 import '../core/api_client.dart';
 import '../core/session.dart';
+import '../core/app_theme.dart';
+import 'job_detail_screen.dart';
 
 class JobsScreen extends StatefulWidget {
 	const JobsScreen({super.key});
@@ -96,16 +98,77 @@ class _JobsScreenState extends State<JobsScreen> {
 			body: _loading
 					? const Center(child: CircularProgressIndicator())
 					: _error != null
-							? Center(child: Text(_error!))
+							? Center(
+								child: Padding(
+									padding: const EdgeInsets.all(16),
+									child: Column(
+										mainAxisSize: MainAxisSize.min,
+										children: [
+											Icon(Icons.error_outline, size: 48, color: AppColors.deepRed),
+											const SizedBox(height: 16),
+											Text(
+												_error!,
+												style: TextStyle(color: AppColors.deepRed),
+												textAlign: TextAlign.center,
+											),
+											const SizedBox(height: 16),
+											FilledButton(
+												onPressed: _load,
+												child: const Text('Retry'),
+											),
+										],
+									),
+								),
+							)
 							: RefreshIndicator(
 								onRefresh: _load,
 								child: ListView.separated(
 									padding: const EdgeInsets.all(12),
 									itemBuilder: (_, i) {
 										final j = _jobs[i] as Map<String, dynamic>;
-										return ListTile(
-											title: Text(j['site'] ?? '(no site)'),
-											subtitle: Text('Status: ${j['status']}'),
+										final status = (j['status'] as String?) ?? '';
+										return Card(
+											margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+											child: ListTile(
+												leading: CircleAvatar(
+													backgroundColor: AppColors.warmAmber.withOpacity(0.1),
+													child: Icon(Icons.work_outline, color: AppColors.warmAmber),
+												),
+												title: Text(
+													j['site'] ?? '(no site)',
+													style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+														fontWeight: FontWeight.w600,
+													),
+												),
+												subtitle: Row(
+													children: [
+														Container(
+															padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+															decoration: BoxDecoration(
+																color: status == 'open'
+																	? AppColors.warmAmber.withOpacity(0.1)
+																	: AppColors.emerald.withOpacity(0.1),
+																borderRadius: BorderRadius.circular(12),
+															),
+															child: Text(
+																status,
+																style: TextStyle(
+																	color: status == 'open' ? AppColors.warmAmber : AppColors.emerald,
+																	fontSize: 12,
+																	fontWeight: FontWeight.w600,
+																),
+															),
+														),
+													],
+												),
+												onTap: () {
+													Navigator.of(context).push(
+														MaterialPageRoute(
+															builder: (_) => JobDetailScreen(jobId: j['id'] as String),
+														),
+													);
+												},
+											),
 										);
 									},
 									separatorBuilder: (_, __) => const Divider(height: 1),

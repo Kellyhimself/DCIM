@@ -80,6 +80,12 @@ class NoteCreate(BaseModel):
 	content_type: Optional[str] = None
 
 
+class NoteUpdate(BaseModel):
+	client_id: Optional[str] = None
+	job_id: Optional[str] = None
+	text: Optional[str] = None
+
+
 class NoteOut(BaseModel):
 	id: UUID
 	client_id: Optional[UUID] = None
@@ -87,6 +93,7 @@ class NoteOut(BaseModel):
 	assignee_id: Optional[UUID] = None
 	text: Optional[str] = None
 	status: str
+	transcription_status: str = "pending"
 	media: List[MediaOut] = []
 
 	class Config:
@@ -101,6 +108,11 @@ class NoteStatusRequest(BaseModel):
 	status: str  # pending|done
 
 
+class TranscriptionUpdateRequest(BaseModel):
+	status: Optional[str] = None  # pending, transcribing, completed, failed
+	text: Optional[str] = None
+
+
 class PresignResponse(BaseModel):
 	upload_url: str
 	method: str = "PUT"
@@ -111,6 +123,23 @@ class PresignResponse(BaseModel):
 
 class ShareSummaryResponse(BaseModel):
 	text: str
+
+
+class EntityLinkSuggestion(BaseModel):
+	type: str  # "client" | "job"
+	suggestion: str  # "create" | "link"
+	name: str
+	phone: Optional[str] = None
+	location: Optional[str] = None
+	existing_client_id: Optional[str] = None  # If linking to existing client
+	existing_job_id: Optional[str] = None  # If linking to existing job
+	client_id: Optional[str] = None  # For job creation - the client to link the job to
+	job_type: Optional[str] = None  # For job creation - the type of job
+	confidence: float = 0.0  # 0.0 to 1.0
+
+
+class EntityLinkSuggestionsResponse(BaseModel):
+	suggestions: List[EntityLinkSuggestion]
 
 
 class TeamCreate(BaseModel):

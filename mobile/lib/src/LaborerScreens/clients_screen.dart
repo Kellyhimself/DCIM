@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../core/api_client.dart';
 import '../core/session.dart';
+import '../core/app_theme.dart';
 
 class ClientsScreen extends StatefulWidget {
 	const ClientsScreen({super.key});
@@ -85,16 +86,52 @@ class _ClientsScreenState extends State<ClientsScreen> {
 			body: _loading
 					? const Center(child: CircularProgressIndicator())
 					: _error != null
-							? Center(child: Text(_error!))
+							? Center(
+								child: Padding(
+									padding: const EdgeInsets.all(16),
+									child: Column(
+										mainAxisSize: MainAxisSize.min,
+										children: [
+											Icon(Icons.error_outline, size: 48, color: AppColors.deepRed),
+											const SizedBox(height: 16),
+											Text(
+												_error!,
+												style: TextStyle(color: AppColors.deepRed),
+												textAlign: TextAlign.center,
+											),
+											const SizedBox(height: 16),
+											FilledButton(
+												onPressed: _load,
+												child: const Text('Retry'),
+											),
+										],
+									),
+								),
+							)
 							: RefreshIndicator(
 								onRefresh: _load,
 								child: ListView.separated(
 									padding: const EdgeInsets.all(12),
 									itemBuilder: (_, i) {
 										final c = _clients[i] as Map<String, dynamic>;
-										return ListTile(
-											title: Text(c['name'] ?? ''),
-											subtitle: Text([c['phone'], c['location']].whereType<String>().where((s) => s.isNotEmpty).join(' • ')),
+										return Card(
+											margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+											child: ListTile(
+												leading: CircleAvatar(
+													backgroundColor: AppColors.deepTeal.withOpacity(0.1),
+													child: Icon(Icons.person, color: AppColors.deepTeal),
+												),
+												title: Text(
+													c['name'] ?? '',
+													style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+														fontWeight: FontWeight.w600,
+													),
+												),
+												subtitle: Text(
+													[c['phone'], c['location']].whereType<String>().where((s) => s.isNotEmpty).join(' • '),
+													style: Theme.of(context).textTheme.bodySmall,
+												),
+											),
 										);
 									},
 									separatorBuilder: (_, __) => const Divider(height: 1),

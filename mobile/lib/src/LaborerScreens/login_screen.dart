@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../core/api_client.dart';
 import '../core/session.dart';
+import '../core/app_theme.dart';
 import 'root_shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -98,7 +99,26 @@ class _LoginScreenState extends State<LoginScreen> {
 									),
 									if (_error != null) ...[
 										const SizedBox(height: 12),
-										Text(_error!, style: const TextStyle(color: Colors.red)),
+										Container(
+											padding: const EdgeInsets.all(12),
+											decoration: BoxDecoration(
+												color: AppColors.deepRed.withOpacity(0.1),
+												borderRadius: BorderRadius.circular(8),
+												border: Border.all(color: AppColors.deepRed.withOpacity(0.3)),
+											),
+											child: Row(
+												children: [
+													Icon(Icons.error_outline, color: AppColors.deepRed, size: 20),
+													const SizedBox(width: 8),
+													Expanded(
+														child: Text(
+															_error!,
+															style: TextStyle(color: AppColors.deepRed, fontSize: 14),
+														),
+													),
+												],
+											),
+										),
 									],
 									const SizedBox(height: 16),
 									SizedBox(

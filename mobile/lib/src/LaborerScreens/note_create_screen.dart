@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../core/api_client.dart';
 import '../core/session.dart';
+import '../core/app_theme.dart';
 
 class NoteCreateScreen extends StatefulWidget {
 	const NoteCreateScreen({super.key});
@@ -136,19 +137,62 @@ class _NoteCreateScreenState extends State<NoteCreateScreen> {
 										label: Text(_recording ? 'Stop' : 'Record'),
 									),
 									const SizedBox(width: 12),
-									if (_audioPath != null) const Text('Audio attached'),
+									if (_audioPath != null)
+										Container(
+											padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+											decoration: BoxDecoration(
+												color: AppColors.emerald.withOpacity(0.1),
+												borderRadius: BorderRadius.circular(8),
+											),
+											child: Row(
+												mainAxisSize: MainAxisSize.min,
+												children: [
+													Icon(Icons.check_circle, color: AppColors.emerald, size: 20),
+													const SizedBox(width: 8),
+													Text(
+														'Audio attached',
+														style: TextStyle(color: AppColors.emerald, fontWeight: FontWeight.w600),
+													),
+												],
+											),
+										),
 								],
 							),
 							if (_error != null) ...[
 								const SizedBox(height: 8),
-								Text(_error!, style: const TextStyle(color: Colors.red)),
+								Container(
+									padding: const EdgeInsets.all(12),
+									decoration: BoxDecoration(
+										color: AppColors.deepRed.withOpacity(0.1),
+										borderRadius: BorderRadius.circular(8),
+										border: Border.all(color: AppColors.deepRed.withOpacity(0.3)),
+									),
+									child: Row(
+										children: [
+											Icon(Icons.error_outline, color: AppColors.deepRed, size: 20),
+											const SizedBox(width: 8),
+											Expanded(
+												child: Text(
+													_error!,
+													style: TextStyle(color: AppColors.deepRed, fontSize: 14),
+												),
+											),
+										],
+									),
+								),
 							],
 							const Spacer(),
 							SizedBox(
 								width: double.infinity,
 								child: FilledButton(
 									onPressed: canSave ? _save : null,
-									child: _saving ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Save'),
+									child: _saving
+										? const SizedBox(
+											height: 20,
+											width: 20,
+											child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+										)
+										: const Text('Save'),
 								),
 							),
 						],

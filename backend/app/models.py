@@ -104,6 +104,7 @@ class Note(Base, TimestampMixin):
 	assignee_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
 	text: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 	status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, done
+	transcription_status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, transcribing, completed, failed
 
 	owner: Mapped[User] = relationship(back_populates="notes", foreign_keys=[owner_id])
 	assignee: Mapped[Optional[User]] = relationship(back_populates="assigned_notes", foreign_keys=[assignee_id])
