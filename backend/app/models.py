@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 import uuid
 
-from sqlalchemy import String, DateTime, ForeignKey, Boolean
+from sqlalchemy import String, DateTime, ForeignKey, Boolean, Text, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,7 @@ class User(Base, TimestampMixin):
 	assigned_notes: Mapped[list["Note"]] = relationship(back_populates="assignee", cascade="all, delete", foreign_keys="Note.assignee_id")
 	owned_teams: Mapped[list["Team"]] = relationship(back_populates="owner", cascade="all, delete")
 	team_memberships: Mapped[list["TeamMember"]] = relationship(back_populates="user", cascade="all, delete")
+	reminders: Mapped[list["Reminder"]] = relationship(back_populates="owner", cascade="all, delete")
 
 
 class Team(Base, TimestampMixin):
@@ -124,3 +125,24 @@ class Media(Base, TimestampMixin):
 	uploaded: Mapped[bool] = mapped_column(Boolean, default=False)
 
 	note: Mapped[Note] = relationship(back_populates="media")
+
+
+class Reminder(Base, TimestampMixin):
+	__tablename__ = "reminders"
+
+	id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+	owner_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	note_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("notes.id", ondelete="SET NULL"), nullable=True, index=True)
+	job_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+	client_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("clients.id", ondelete="SET NULL"), nullable=True, index=True)
+	text: Mapped[str] = mapped_column(Text)  # Reminder text (e.g., "return Monday", "call client")
+	type: Mapped[str] = mapped_column(String(50), default="follow_up")  # follow_up, call, return, check, meeting, etc.
+	due_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)  # Parsed due date
+	due_date_text: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Original text (e.g., "Monday", "tomorrow")
+	status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, completed, cancelled
+	completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+	owner: Mapped[User] = relationship(back_populates="reminders", foreign_keys=[owner_id])
+	note: Mapped[Optional[Note]] = relationship(foreign_keys=[note_id])
+	job: Mapped[Optional[Job]] = relationship(foreign_keys=[job_id])
+	client: Mapped[Optional[Client]] = relationship(foreign_keys=[client_id])

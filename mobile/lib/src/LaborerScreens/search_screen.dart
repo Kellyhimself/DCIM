@@ -373,13 +373,13 @@ class _SearchScreenState extends State<SearchScreen> {
 												padding: const EdgeInsets.symmetric(vertical: 8),
 												child: Row(
 													children: [
-														Icon(Icons.person, size: 18, color: AppColors.deepTeal),
+														Icon(Icons.person, size: 18, color: AppColors.softCoral),
 														const SizedBox(width: 8),
 														Text(
 															'Clients (${_clients.length})',
 															style: Theme.of(context).textTheme.titleSmall?.copyWith(
 																fontWeight: FontWeight.bold,
-																color: AppColors.deepTeal,
+																color: AppColors.softCoral,
 															),
 														),
 													],
@@ -391,8 +391,8 @@ class _SearchScreenState extends State<SearchScreen> {
 													dense: true,
 													leading: CircleAvatar(
 														radius: 18,
-														backgroundColor: AppColors.deepTeal.withOpacity(0.1),
-														child: Icon(Icons.person, color: AppColors.deepTeal, size: 18),
+														backgroundColor: AppColors.softCoral.withOpacity(0.1),
+														child: Icon(Icons.person, color: AppColors.softCoral, size: 18),
 													),
 													title: Text(
 														c['name'] ?? '',

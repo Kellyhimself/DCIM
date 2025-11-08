@@ -118,8 +118,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
 											margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
 											child: ListTile(
 												leading: CircleAvatar(
-													backgroundColor: AppColors.deepTeal.withOpacity(0.1),
-													child: Icon(Icons.person, color: AppColors.deepTeal),
+													backgroundColor: AppColors.softCoral.withOpacity(0.1),
+													child: Icon(Icons.person, color: AppColors.softCoral),
 												),
 												title: Text(
 													c['name'] ?? '',

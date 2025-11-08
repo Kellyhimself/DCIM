@@ -11,7 +11,7 @@ from backend.app.deps import get_current_user
 from backend.app.pdf import generate_job_pdf
 from backend.app.storage import get_s3_client, create_presigned_get
 from backend.app.settings import settings
-from backend.app.routers.nlp import _extract_phones, _extract_amounts, _extract_dates, _extract_parts
+from backend.app.routers.nlp import _extract_phones, _extract_amounts, _extract_dates, _extract_parts, extract_entities
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -157,3 +157,94 @@ def download_job_pdf(job_id: UUID, db: Session = Depends(get_db), current_user: 
 		if error_code == 'NoSuchKey':
 			raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not found. Please generate it first.")
 		raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to download PDF: {str(e)}")
+
+
+def extract_amount_value(amount_str: str) -> float:
+	"""Extract numeric value from amount string like '5000 Kenyan shillings' or '2000'."""
+	import re
+	# Remove common currency words
+	cleaned = re.sub(r'(kenyan\s+)?shillings?|kes|ksh', '', amount_str.lower(), flags=re.IGNORECASE)
+	# Remove commas and extract numbers
+	numbers = re.findall(r'[\d,]+\.?\d*', cleaned)
+	if numbers:
+		# Remove commas and convert to float
+		value_str = numbers[0].replace(',', '')
+		try:
+			return float(value_str)
+		except ValueError:
+			pass
+	return 0.0
+
+
+@router.get("/{job_id}/financial")
+def get_job_financial(
+	job_id: UUID,
+	db: Session = Depends(get_db),
+	current_user: User = Depends(get_current_user)
+):
+	"""
+	Get financial summary for a specific job.
+	Extracts financial data from notes linked to this job using NLP.
+	"""
+	j = db.query(Job).filter(Job.id == job_id, Job.owner_id == current_user.id).first()
+	if not j:
+		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+	
+	# Get all notes for this job
+	notes = db.query(Note).filter(
+		Note.job_id == job_id,
+		Note.owner_id == current_user.id,
+		Note.text.isnot(None)
+	).all()
+	
+	total_earnings = 0.0
+	total_expenses = 0.0
+	total_projected_earnings = 0.0
+	total_projected_expenses = 0.0
+	
+	# Process each note
+	for note in notes:
+		if not note.text:
+			continue
+		
+		# Extract entities using NLP (will use cache if available)
+		entities = extract_entities(note.text, "KE")
+		
+		# Process ACTUAL earnings
+		for earning_str in entities.earnings:
+			amount = extract_amount_value(earning_str)
+			total_earnings += amount
+		
+		# Process ACTUAL expenses
+		for expense_str in entities.expenses:
+			amount = extract_amount_value(expense_str)
+			total_expenses += amount
+		
+		# Process PROJECTED earnings (quotes, estimates)
+		for earning_str in entities.projected_earnings:
+			amount = extract_amount_value(earning_str)
+			total_projected_earnings += amount
+		
+		# Process PROJECTED expenses (planned costs, estimates)
+		for expense_str in entities.projected_expenses:
+			amount = extract_amount_value(expense_str)
+			total_projected_expenses += amount
+	
+	# Calculate profits
+	net_profit = total_earnings - total_expenses
+	projected_profit = total_projected_earnings - total_projected_expenses
+	total_combined_earnings = total_earnings + total_projected_earnings
+	total_combined_expenses = total_expenses + total_projected_expenses
+	combined_profit = total_combined_earnings - total_combined_expenses
+	
+	return {
+		"total_earnings": total_earnings,
+		"total_expenses": total_expenses,
+		"net_profit": net_profit,
+		"total_projected_earnings": total_projected_earnings,
+		"total_projected_expenses": total_projected_expenses,
+		"projected_profit": projected_profit,
+		"total_combined_earnings": total_combined_earnings,
+		"total_combined_expenses": total_combined_expenses,
+		"combined_profit": combined_profit,
+	}

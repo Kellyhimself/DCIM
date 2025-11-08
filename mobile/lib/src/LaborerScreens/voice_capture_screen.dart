@@ -14,7 +14,10 @@ import '../core/session.dart';
 import '../core/app_theme.dart';
 
 class VoiceCaptureScreen extends StatefulWidget {
-	const VoiceCaptureScreen({super.key});
+	final String? jobId;
+	final String? clientId;
+	
+	const VoiceCaptureScreen({super.key, this.jobId, this.clientId});
 
 	@override
 	State<VoiceCaptureScreen> createState() => _VoiceCaptureScreenState();
@@ -513,10 +516,17 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 		setState(() { _saving = true; _error = null; });
 		_api.attachSession(_session);
 		try {
-			// Create note first
-			final createResp = await _api.dio.post('/notes', data: {
+			// Create note first - include job_id and client_id if provided
+			final noteData = <String, dynamic>{
 				'text': null, // Will be filled by transcription
-			});
+			};
+			if (widget.jobId != null) {
+				noteData['job_id'] = widget.jobId;
+			}
+			if (widget.clientId != null) {
+				noteData['client_id'] = widget.clientId;
+			}
+			final createResp = await _api.dio.post('/notes', data: noteData);
 			final note = createResp.data as Map<String, dynamic>;
 			final noteId = note['id'] as String;
 			_submittedNoteId = noteId;
@@ -699,7 +709,7 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 										style: FilledButton.styleFrom(
 											shape: const CircleBorder(),
 											padding: EdgeInsets.zero,
-											backgroundColor: _recording ? AppColors.deepRed : AppColors.deepTeal,
+											backgroundColor: _recording ? AppColors.deepRed : AppColors.softCoral,
 										),
 										child: Icon(
 											_recording ? Icons.stop : Icons.mic,
@@ -716,14 +726,14 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 									padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
 									decoration: BoxDecoration(
 										color: _transcriptionStatus == 'transcribing'
-											? AppColors.deepTeal.withOpacity(0.1)
+											? AppColors.softCoral.withOpacity(0.1)
 											: _transcriptionStatus == 'completed'
 												? AppColors.emerald.withOpacity(0.1)
 												: AppColors.deepRed.withOpacity(0.1),
 										borderRadius: BorderRadius.circular(8),
 										border: Border.all(
 											color: _transcriptionStatus == 'transcribing'
-												? AppColors.deepTeal.withOpacity(0.3)
+												? AppColors.softCoral.withOpacity(0.3)
 												: _transcriptionStatus == 'completed'
 													? AppColors.emerald.withOpacity(0.3)
 													: AppColors.deepRed.withOpacity(0.3),
@@ -738,7 +748,7 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 													height: 16,
 													child: CircularProgressIndicator(
 														strokeWidth: 2,
-														valueColor: AlwaysStoppedAnimation<Color>(AppColors.deepTeal),
+														valueColor: AlwaysStoppedAnimation<Color>(AppColors.softCoral),
 													),
 												)
 											else if (_transcriptionStatus == 'completed')
@@ -754,7 +764,7 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 														: 'Transcription failed',
 												style: TextStyle(
 													color: _transcriptionStatus == 'transcribing'
-														? AppColors.deepTeal
+														? AppColors.softCoral
 														: _transcriptionStatus == 'completed'
 															? AppColors.emerald
 															: AppColors.deepRed,
@@ -826,14 +836,14 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 											height: 12,
 											child: CircularProgressIndicator(
 												strokeWidth: 2,
-												valueColor: AlwaysStoppedAnimation<Color>(AppColors.deepTeal),
+												valueColor: AlwaysStoppedAnimation<Color>(AppColors.softCoral),
 											),
 										),
 										const SizedBox(width: 8),
 										Text(
 											'Transcribing in background...',
 											style: TextStyle(
-												color: AppColors.deepTeal,
+												color: AppColors.softCoral,
 												fontSize: 12,
 												fontStyle: FontStyle.italic,
 											),
@@ -880,19 +890,19 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 								Container(
 									padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
 									decoration: BoxDecoration(
-										color: AppColors.deepTeal.withOpacity(0.05),
+										color: AppColors.softCoral.withOpacity(0.05),
 										borderRadius: BorderRadius.circular(6),
 									),
 									child: Row(
 										mainAxisSize: MainAxisSize.min,
 										children: [
-											Icon(Icons.info_outline, size: 14, color: AppColors.deepTeal),
+											Icon(Icons.info_outline, size: 14, color: AppColors.softCoral),
 											const SizedBox(width: 6),
 											Text(
 												'${_discoveredPhones.length + _discoveredAmounts.length + _discoveredDates.length + _discoveredParts.length + _discoveredClientNames.length + _discoveredJobTypes.length + _discoveredLocations.length} entities found',
 												style: TextStyle(
 													fontSize: 11,
-													color: AppColors.deepTeal,
+													color: AppColors.softCoral,
 													fontStyle: FontStyle.italic,
 												),
 											),
@@ -906,9 +916,9 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 								Container(
 									padding: const EdgeInsets.all(10),
 									decoration: BoxDecoration(
-										color: AppColors.deepTeal.withOpacity(0.05),
+										color: AppColors.softCoral.withOpacity(0.05),
 										borderRadius: BorderRadius.circular(8),
-										border: Border.all(color: AppColors.deepTeal.withOpacity(0.2)),
+										border: Border.all(color: AppColors.softCoral.withOpacity(0.2)),
 									),
 									child: Column(
 										crossAxisAlignment: CrossAxisAlignment.start,
@@ -916,13 +926,13 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 										children: [
 											Row(
 												children: [
-													Icon(Icons.lightbulb_outline, size: 16, color: AppColors.deepTeal),
+													Icon(Icons.lightbulb_outline, size: 16, color: AppColors.softCoral),
 													const SizedBox(width: 6),
 													Text(
 														'Quick Actions',
 														style: TextStyle(
 															fontWeight: FontWeight.w600,
-															color: AppColors.deepTeal,
+															color: AppColors.softCoral,
 															fontSize: 13,
 														),
 													),
@@ -933,7 +943,7 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 															height: 14,
 															child: CircularProgressIndicator(
 																strokeWidth: 2,
-																valueColor: AlwaysStoppedAnimation<Color>(AppColors.deepTeal),
+																valueColor: AlwaysStoppedAnimation<Color>(AppColors.softCoral),
 															),
 														),
 												],
@@ -952,13 +962,13 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 													
 													String label = '';
 													IconData icon = Icons.info;
-													Color color = AppColors.deepTeal;
+													Color color = AppColors.softCoral;
 													
 													if (type == 'client') {
 														if (suggestionType == 'link') {
 															label = 'Link to ${name.isNotEmpty ? name : "client"}';
 															icon = Icons.link;
-															color = AppColors.deepTeal;
+															color = AppColors.softCoral;
 														} else {
 															label = 'Create: ${name.isNotEmpty ? name : phone ?? "New client"}';
 															icon = Icons.person_add;
@@ -1069,7 +1079,7 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 																: const Icon(Icons.check, size: 16),
 															label: Text(_applyingSuggestions ? 'Applying...' : 'Apply ${_selectedSuggestions.length} action${_selectedSuggestions.length > 1 ? 's' : ''}'),
 															style: FilledButton.styleFrom(
-																backgroundColor: AppColors.deepTeal,
+																backgroundColor: AppColors.softCoral,
 																padding: const EdgeInsets.symmetric(vertical: 10),
 															),
 														),
@@ -1113,8 +1123,8 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 										icon: const Icon(Icons.share),
 										label: const Text('Share via WhatsApp'),
 										style: OutlinedButton.styleFrom(
-											foregroundColor: AppColors.deepTeal,
-											side: BorderSide(color: AppColors.deepTeal),
+											foregroundColor: AppColors.softCoral,
+											side: BorderSide(color: AppColors.softCoral),
 										),
 									),
 								),
@@ -1127,7 +1137,7 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 									style: FilledButton.styleFrom(
 										backgroundColor: _submitted && _transcriptionStatus == 'completed' 
 											? AppColors.emerald 
-											: AppColors.deepTeal,
+											: AppColors.softCoral,
 									),
 								child: _saving
 									? const SizedBox(

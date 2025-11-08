@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 /// Trustworthy, energetic, readable, and friendly colors for practical users
 class AppColors {
 	// Primary Colors
-	static const Color deepTeal =  Color(0xFFFB8500);
+	
 	static const Color warmAmber = Color(0xFFFB8500);
 	static const Color softCoral = Color(0xFFFB8500);//this one
 	
@@ -106,7 +106,7 @@ class AppTheme {
 		// Using base ColorScheme() constructor to prevent Material 3 auto-generation
 		final colorScheme = ColorScheme(
 			brightness: Brightness.light,
-			primary: AppColors.deepTeal,
+			primary: AppColors.softCoral,
 			onPrimary: Colors.white,
 			secondary: AppColors.warmAmber,
 			onSecondary: AppColors.charcoal,
@@ -126,7 +126,7 @@ class AppTheme {
 			scrim: Colors.black,
 			inverseSurface: AppColors.charcoal,
 			onInverseSurface: AppColors.white,
-			inversePrimary: AppColors.deepTeal.withOpacity(0.2),
+			inversePrimary: AppColors.softCoral.withOpacity(0.2),
 		);
 		
 		return ThemeData(
@@ -137,9 +137,9 @@ class AppTheme {
 			
 			// Explicitly set text selection colors to prevent green tint
 			textSelectionTheme: TextSelectionThemeData(
-				cursorColor: AppColors.deepTeal,
-				selectionColor: AppColors.deepTeal.withOpacity(0.3),
-				selectionHandleColor: AppColors.deepTeal,
+				cursorColor: AppColors.softCoral,
+				selectionColor: AppColors.softCoral.withOpacity(0.3),
+				selectionHandleColor: AppColors.softCoral,
 			),
 			
 			// Scaffold
@@ -147,7 +147,7 @@ class AppTheme {
 			
 			// App Bar
 			appBarTheme: const AppBarTheme(
-				backgroundColor: AppColors.deepTeal,
+				backgroundColor: AppColors.softCoral,
 				foregroundColor: Colors.white,
 				elevation: 0,
 				centerTitle: false,
@@ -172,7 +172,7 @@ class AppTheme {
 			// Button Themes
 			elevatedButtonTheme: ElevatedButtonThemeData(
 				style: ElevatedButton.styleFrom(
-					backgroundColor: AppColors.deepTeal,
+					backgroundColor: AppColors.softCoral,
 					foregroundColor: Colors.white,
 					elevation: 2,
 					padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -185,7 +185,7 @@ class AppTheme {
 			
 			filledButtonTheme: FilledButtonThemeData(
 				style: FilledButton.styleFrom(
-					backgroundColor: AppColors.deepTeal,
+					backgroundColor: AppColors.softCoral,
 					foregroundColor: Colors.white,
 					padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
 					shape: RoundedRectangleBorder(
@@ -197,21 +197,21 @@ class AppTheme {
 			
 			outlinedButtonTheme: OutlinedButtonThemeData(
 				style: OutlinedButton.styleFrom(
-					foregroundColor: AppColors.deepTeal,
+					foregroundColor: AppColors.softCoral,
 					padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-					side: const BorderSide(color: AppColors.deepTeal, width: 1.5),
+					side: const BorderSide(color: AppColors.softCoral, width: 1.5),
 					shape: RoundedRectangleBorder(
 						borderRadius: BorderRadius.circular(8),
 					),
-					textStyle: AppTextStyles.labelLarge.copyWith(color: AppColors.deepTeal),
+					textStyle: AppTextStyles.labelLarge.copyWith(color: AppColors.softCoral),
 				),
 			),
 			
 			textButtonTheme: TextButtonThemeData(
 				style: TextButton.styleFrom(
-					foregroundColor: AppColors.deepTeal,
+					foregroundColor: AppColors.softCoral,
 					padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-					textStyle: AppTextStyles.labelLarge.copyWith(color: AppColors.deepTeal),
+					textStyle: AppTextStyles.labelLarge.copyWith(color: AppColors.softCoral),
 				),
 			),
 			
@@ -236,7 +236,7 @@ class AppTheme {
 				),
 				focusedBorder: OutlineInputBorder(
 					borderRadius: BorderRadius.circular(8),
-					borderSide: const BorderSide(color: AppColors.deepTeal, width: 2),
+					borderSide: const BorderSide(color: AppColors.softCoral, width: 2),
 				),
 				errorBorder: OutlineInputBorder(
 					borderRadius: BorderRadius.circular(8),
@@ -248,7 +248,7 @@ class AppTheme {
 				),
 				contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
 				labelStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.slateGrey),
-				floatingLabelStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.deepTeal),
+				floatingLabelStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.softCoral),
 				hintStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.slateGrey),
 			),
 			
@@ -273,23 +273,23 @@ class AppTheme {
 			
 			// Icon Theme
 			iconTheme: const IconThemeData(
-				color: AppColors.deepTeal,
+				color: AppColors.softCoral,
 				size: 24,
 			),
 			
 			// Navigation Bar (Bottom Navigation)
 			navigationBarTheme: NavigationBarThemeData(
 				backgroundColor: AppColors.white,
-				indicatorColor: AppColors.deepTeal.withOpacity(0.1),
+				indicatorColor: AppColors.softCoral.withOpacity(0.1),
 				labelTextStyle: MaterialStateProperty.resolveWith((states) {
 					if (states.contains(MaterialState.selected)) {
-						return AppTextStyles.labelSmall.copyWith(color: AppColors.deepTeal);
+						return AppTextStyles.labelSmall.copyWith(color: AppColors.softCoral);
 					}
 					return AppTextStyles.labelSmall.copyWith(color: AppColors.slateGrey);
 				}),
 				iconTheme: MaterialStateProperty.resolveWith((states) {
 					if (states.contains(MaterialState.selected)) {
-						return const IconThemeData(color: AppColors.deepTeal);
+						return const IconThemeData(color: AppColors.softCoral);
 					}
 					return const IconThemeData(color: AppColors.slateGrey);
 				}),
@@ -300,7 +300,7 @@ class AppTheme {
 				backgroundColor: AppColors.sandGrey,
 				deleteIconColor: AppColors.charcoal,
 				disabledColor: AppColors.sandGrey.withOpacity(0.5),
-				selectedColor: AppColors.deepTeal,
+				selectedColor: AppColors.softCoral,
 				secondarySelectedColor: AppColors.warmAmber,
 				padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
 				labelStyle: AppTextStyles.bodySmall,

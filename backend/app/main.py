@@ -14,6 +14,8 @@ from backend.app.routers import search as search_router
 from backend.app.routers import nlp as nlp_router
 from backend.app.routers import billing as billing_router
 from backend.app.routers import teams as teams_router
+from backend.app.routers import reminders as reminders_router
+from backend.app.routers import dashboard as dashboard_router
 
 # Configure logging
 logging.basicConfig(
@@ -86,6 +88,8 @@ app.include_router(search_router.router)
 app.include_router(nlp_router.router)
 app.include_router(billing_router.router)
 app.include_router(teams_router.router)
+app.include_router(reminders_router.router)
+app.include_router(dashboard_router.router)
 
 
 @app.get("/healthz")

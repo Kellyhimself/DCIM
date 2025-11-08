@@ -25,7 +25,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 	Map<String, dynamic>? _job;
 	Map<String, dynamic>? _client;
 	List<dynamic> _notes = [];
-	Map<String, dynamic>? _entities;
+	Map<String, dynamic>? _financialData;
 	bool _loading = true;
 	bool _generatingPdf = false;
 	bool _updatingStatus = false;
@@ -74,34 +74,22 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 			final allNotes = notesResp.data as List;
 			final jobNotes = allNotes.where((n) => n['job_id'] == job['id']).toList();
 			
-			// Extract entities from all notes combined
-			Map<String, dynamic>? entities;
-			if (jobNotes.isNotEmpty) {
-				final allText = jobNotes
-					.where((n) => n['text'] != null && (n['text'] as String).isNotEmpty)
-					.map((n) => n['text'] as String)
-					.join(' ');
-				
-				if (allText.isNotEmpty) {
-					try {
-						final nlpResp = await _api.dio.post('/nlp/tag', data: {
-							'text': allText,
-							'region': 'KE',
-						});
-						if (mounted) {
-							entities = nlpResp.data as Map<String, dynamic>;
-						}
-					} catch (e) {
-						print('Error extracting entities: $e');
-					}
+			// Fetch financial data for this job
+			Map<String, dynamic>? financialData;
+			try {
+				final financialResp = await _api.dio.get('/jobs/${widget.jobId}/financial');
+				if (mounted) {
+					financialData = financialResp.data as Map<String, dynamic>;
 				}
+			} catch (e) {
+				print('Error fetching financial data: $e');
 			}
 			
 			safeSetState(() {
 				_job = job;
 				_client = client;
 				_notes = jobNotes;
-				_entities = entities;
+				_financialData = financialData;
 			});
 		} on DioException catch (e) {
 			safeSetState(() {
@@ -138,10 +126,30 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 		}
 	}
 
+	Future<void> _updateNoteStatus(String noteId, String newStatus) async {
+		_api.attachSession(_session);
+		try {
+			await _api.dio.post('/notes/$noteId/status', data: {'status': newStatus});
+			await _load();
+		} catch (e) {
+			if (!mounted) return;
+			ScaffoldMessenger.of(context).showSnackBar(
+				SnackBar(
+					content: Text('Failed to update note status: ${e.toString()}'),
+					backgroundColor: AppColors.deepRed,
+					duration: const Duration(seconds: 2),
+				),
+			);
+		}
+	}
+
 	Future<void> _createNote() async {
 		await Navigator.of(context).push(
 			MaterialPageRoute(
-				builder: (_) => const VoiceCaptureScreen(),
+				builder: (_) => VoiceCaptureScreen(
+					jobId: widget.jobId,
+					clientId: _job?['client_id'] as String?,
+				),
 			),
 		);
 		// Reload to show any new notes
@@ -356,7 +364,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 														const SizedBox(height: 8),
 														Row(
 															children: [
-																Icon(Icons.person_outline, size: 16, color: AppColors.deepTeal),
+																Icon(Icons.person_outline, size: 16, color: AppColors.softCoral),
 																const SizedBox(width: 6),
 																Expanded(
 																	child: Text(
@@ -393,8 +401,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 													icon: const Icon(Icons.add, size: 18),
 													label: const Text('Add Note', style: TextStyle(fontSize: 13)),
 													style: OutlinedButton.styleFrom(
-														foregroundColor: AppColors.deepTeal,
-														side: BorderSide(color: AppColors.deepTeal),
+														foregroundColor: AppColors.softCoral,
+														side: BorderSide(color: AppColors.softCoral),
 														padding: const EdgeInsets.symmetric(vertical: 10),
 													),
 												),
@@ -415,7 +423,7 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 														style: const TextStyle(fontSize: 13),
 													),
 													style: FilledButton.styleFrom(
-														backgroundColor: AppColors.deepTeal,
+														backgroundColor: AppColors.softCoral,
 														foregroundColor: Colors.white,
 														padding: const EdgeInsets.symmetric(vertical: 10),
 													),
@@ -424,44 +432,149 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 										],
 									),
 									
-									// Entities Summary - Compact (only if entities exist)
-									if (_entities != null && _hasEntities(_entities!)) ...[
+									// Financial Summary - Compact
+									if (_financialData != null) ...[
 										const SizedBox(height: 12),
 										Card(
-											color: AppColors.deepTeal.withOpacity(0.05),
+											color: AppColors.softCoral.withOpacity(0.05),
 											child: Padding(
 												padding: const EdgeInsets.all(10),
-												child: Wrap(
-													spacing: 6,
-													runSpacing: 6,
+												child: Column(
+													crossAxisAlignment: CrossAxisAlignment.start,
 													children: [
-														if (_entities!['parts'] != null && (_entities!['parts'] as List).isNotEmpty)
-															...(_entities!['parts'] as List).take(3).map((p) => Chip(
-																label: Text(p.toString(), style: const TextStyle(fontSize: 11)),
-																avatar: const Icon(Icons.build, size: 14),
-																padding: EdgeInsets.zero,
-																labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-																materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-																visualDensity: VisualDensity.compact,
-															)),
-														if (_entities!['amounts'] != null && (_entities!['amounts'] as List).isNotEmpty)
-															...(_entities!['amounts'] as List).take(2).map((a) => Chip(
-																label: Text(a.toString(), style: const TextStyle(fontSize: 11)),
-																avatar: const Icon(Icons.attach_money, size: 14),
-																padding: EdgeInsets.zero,
-																labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-																materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-																visualDensity: VisualDensity.compact,
-															)),
-														if (_entities!['dates'] != null && (_entities!['dates'] as List).isNotEmpty)
-															...(_entities!['dates'] as List).take(2).map((d) => Chip(
-																label: Text(d.toString(), style: const TextStyle(fontSize: 11)),
-																avatar: const Icon(Icons.calendar_today, size: 14),
-																padding: EdgeInsets.zero,
-																labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-																materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-																visualDensity: VisualDensity.compact,
-															)),
+														// Actual Section
+														Text(
+															'Actual',
+															style: Theme.of(context).textTheme.bodySmall?.copyWith(
+																fontSize: 11,
+																fontWeight: FontWeight.w600,
+															),
+														),
+														const SizedBox(height: 4),
+														Wrap(
+															spacing: 6,
+															runSpacing: 6,
+															children: [
+																Chip(
+																	label: Text(
+																		'Earnings: KES ${NumberFormat('#,##0.00').format((_financialData!['total_earnings'] as num?)?.toDouble() ?? 0.0)}',
+																		style: const TextStyle(fontSize: 11),
+																	),
+																	avatar: const Icon(Icons.trending_up, size: 14),
+																	padding: EdgeInsets.zero,
+																	labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+																	materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+																	visualDensity: VisualDensity.compact,
+																),
+																Chip(
+																	label: Text(
+																		'Expenses: KES ${NumberFormat('#,##0.00').format((_financialData!['total_expenses'] as num?)?.toDouble() ?? 0.0)}',
+																		style: const TextStyle(fontSize: 11),
+																	),
+																	avatar: const Icon(Icons.trending_down, size: 14),
+																	padding: EdgeInsets.zero,
+																	labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+																	materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+																	visualDensity: VisualDensity.compact,
+																),
+															],
+														),
+														const SizedBox(height: 8),
+														// Projected Section
+														Row(
+															children: [
+																Text(
+																	'Projected',
+																	style: Theme.of(context).textTheme.bodySmall?.copyWith(
+																		fontSize: 11,
+																		fontWeight: FontWeight.w600,
+																	),
+																),
+																const SizedBox(width: 4),
+																Container(
+																	padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+																	decoration: BoxDecoration(
+																		color: AppColors.warmAmber.withOpacity(0.1),
+																		borderRadius: BorderRadius.circular(4),
+																	),
+																	child: Text(
+																		'Est',
+																		style: TextStyle(
+																			color: AppColors.warmAmber,
+																			fontSize: 9,
+																			fontWeight: FontWeight.w600,
+																		),
+																	),
+																),
+															],
+														),
+														const SizedBox(height: 4),
+														Wrap(
+															spacing: 6,
+															runSpacing: 6,
+															children: [
+																Chip(
+																	label: Text(
+																		'Earnings: KES ${NumberFormat('#,##0.00').format((_financialData!['total_projected_earnings'] as num?)?.toDouble() ?? 0.0)}',
+																		style: const TextStyle(fontSize: 11),
+																	),
+																	avatar: const Icon(Icons.trending_up, size: 14),
+																	padding: EdgeInsets.zero,
+																	labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+																	materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+																	visualDensity: VisualDensity.compact,
+																),
+																Chip(
+																	label: Text(
+																		'Expenses: KES ${NumberFormat('#,##0.00').format((_financialData!['total_projected_expenses'] as num?)?.toDouble() ?? 0.0)}',
+																		style: const TextStyle(fontSize: 11),
+																	),
+																	avatar: const Icon(Icons.trending_down, size: 14),
+																	padding: EdgeInsets.zero,
+																	labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+																	materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+																	visualDensity: VisualDensity.compact,
+																),
+															],
+														),
+														const SizedBox(height: 8),
+														// Combined Section
+														Text(
+															'Combined',
+															style: Theme.of(context).textTheme.bodySmall?.copyWith(
+																fontSize: 11,
+																fontWeight: FontWeight.w600,
+															),
+														),
+														const SizedBox(height: 4),
+														Wrap(
+															spacing: 6,
+															runSpacing: 6,
+															children: [
+																Chip(
+																	label: Text(
+																		'Earnings: KES ${NumberFormat('#,##0.00').format((_financialData!['total_combined_earnings'] as num?)?.toDouble() ?? 0.0)}',
+																		style: const TextStyle(fontSize: 11),
+																	),
+																	avatar: const Icon(Icons.trending_up, size: 14),
+																	padding: EdgeInsets.zero,
+																	labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+																	materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+																	visualDensity: VisualDensity.compact,
+																),
+																Chip(
+																	label: Text(
+																		'Expenses: KES ${NumberFormat('#,##0.00').format((_financialData!['total_combined_expenses'] as num?)?.toDouble() ?? 0.0)}',
+																		style: const TextStyle(fontSize: 11),
+																	),
+																	avatar: const Icon(Icons.trending_down, size: 14),
+																	padding: EdgeInsets.zero,
+																	labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+																	materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+																	visualDensity: VisualDensity.compact,
+																),
+															],
+														),
 													],
 												),
 											),
@@ -477,20 +590,20 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 												'Notes',
 												style: Theme.of(context).textTheme.titleSmall?.copyWith(
 													fontWeight: FontWeight.bold,
-													color: AppColors.deepTeal,
+													color: AppColors.softCoral,
 												),
 											),
 											const SizedBox(width: 6),
 											Container(
 												padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
 												decoration: BoxDecoration(
-													color: AppColors.deepTeal.withOpacity(0.1),
+													color: AppColors.softCoral.withOpacity(0.1),
 													borderRadius: BorderRadius.circular(10),
 												),
 												child: Text(
 													'${_notes.length}',
 													style: TextStyle(
-														color: AppColors.deepTeal,
+														color: AppColors.softCoral,
 														fontSize: 11,
 														fontWeight: FontWeight.w600,
 													),
@@ -531,7 +644,8 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 												margin: const EdgeInsets.only(bottom: 8),
 												child: InkWell(
 													onTap: () {
-														// Could navigate to note detail in future
+														// Toggle note status
+														_updateNoteStatus(note['id'] as String, noteStatus == 'done' ? 'pending' : 'done');
 													},
 													child: Padding(
 														padding: const EdgeInsets.all(10),
@@ -553,18 +667,35 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 																				),
 																			),
 																		),
-																		Container(
-																			padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-																			decoration: BoxDecoration(
-																				color: (noteStatus == 'done' ? AppColors.emerald : AppColors.warmAmber).withOpacity(0.1),
-																				borderRadius: BorderRadius.circular(8),
-																			),
-																			child: Text(
-																				noteStatus,
-																				style: TextStyle(
-																					color: noteStatus == 'done' ? AppColors.emerald : AppColors.warmAmber,
-																					fontSize: 9,
-																					fontWeight: FontWeight.w600,
+																		GestureDetector(
+																			onTap: () {
+																				// Toggle note status
+																				_updateNoteStatus(note['id'] as String, noteStatus == 'done' ? 'pending' : 'done');
+																			},
+																			child: Container(
+																				padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+																				decoration: BoxDecoration(
+																					color: (noteStatus == 'done' ? AppColors.emerald : AppColors.warmAmber).withOpacity(0.1),
+																					borderRadius: BorderRadius.circular(8),
+																				),
+																				child: Row(
+																					mainAxisSize: MainAxisSize.min,
+																					children: [
+																						Icon(
+																							noteStatus == 'done' ? Icons.check_circle : Icons.radio_button_unchecked,
+																							size: 10,
+																							color: noteStatus == 'done' ? AppColors.emerald : AppColors.warmAmber,
+																						),
+																						const SizedBox(width: 4),
+																						Text(
+																							noteStatus,
+																							style: TextStyle(
+																								color: noteStatus == 'done' ? AppColors.emerald : AppColors.warmAmber,
+																								fontSize: 9,
+																								fontWeight: FontWeight.w600,
+																							),
+																						),
+																					],
 																				),
 																			),
 																		),
@@ -594,10 +725,5 @@ class _JobDetailScreenState extends State<JobDetailScreen> {
 		);
 	}
 
-	bool _hasEntities(Map<String, dynamic> entities) {
-		return (entities['parts'] != null && (entities['parts'] as List).isNotEmpty) ||
-			(entities['amounts'] != null && (entities['amounts'] as List).isNotEmpty) ||
-			(entities['dates'] != null && (entities['dates'] as List).isNotEmpty);
-	}
 }
 

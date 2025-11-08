@@ -50,6 +50,15 @@ class NLPResponse(BaseModel):
 	client_names: List[str] = []
 	job_types: List[str] = []
 	locations: List[str] = []
+	# Financial tracking - Actual (money already spent/received)
+	expenses: List[str] = []  # Money already spent (e.g., "bought materials for 2000", "spent 500 on transport", "paid 1500 for parts")
+	earnings: List[str] = []  # Money already received (e.g., "charged 5000", "client paid 8000", "received 3000")
+	# Financial tracking - Projected (quotes, estimates, planned costs)
+	projected_expenses: List[str] = []  # Planned/future expenses (e.g., "will cost 3000", "adds 2000 to materials", "estimated 1500 for parts")
+	projected_earnings: List[str] = []  # Quotes/estimates (e.g., "quote is 43000", "estimated 5000", "will charge 8000")
+	# Reminders and actions
+	reminders: List[dict] = []  # [{text: "return Monday", due_date: "Monday", type: "follow_up"}]
+	shopping_items: List[str] = []  # Items to buy (e.g., "need to buy 3 elbows", "bring plunger")
 
 
 _amount_patterns = [
@@ -402,7 +411,8 @@ def _extract_entities_with_llm(text: str, region: str = "KE") -> Optional[NLPRes
 	try:
 		client = OpenAI(api_key=api_key)
 		
-		prompt = f"""Extract structured job data from this voice note transcription. The context is blue-collar work in Kenya (plumbing, electrical, carpentry, contructions etc.).
+		prompt = f"""Extract structured job data from this voice note transcription. The context is blue-collar work in Kenya (plumbing, electrical, carpentry, constructions, mechanic, driver, fundis,
+		tailors ).
 
 Text: "{text}"
 
@@ -414,6 +424,12 @@ Extract the following entities and return ONLY valid JSON (no markdown, no expla
 - client_names: List of client/customer names mentioned (e.g., "Sarah", "David Ochieng", "Mama Akinyi")
 - job_types: List of job types mentioned (e.g., "plumbing", "electrical", "carpentry", "repair", "installation", "maintenance")
 - locations: List of locations/areas mentioned (e.g., "Karen", "Parklands", "Nairobi", "Kilimani")
+- expenses: List of ACTUAL expenses (money already spent, e.g., "bought materials for 2000", "spent 500 on transport", "paid 1500 for parts", "I paid 2000")
+- earnings: List of ACTUAL earnings (money already received, e.g., "client paid 5000", "received 8000", "got paid 3000", "they paid me 5000")
+- projected_expenses: List of PROJECTED/PLANNED expenses (future costs, quotes, estimates, e.g., "will cost 3000", "adds 2000 to materials", "estimated 1500", "that adds KES 3000 to the cost")
+- projected_earnings: List of PROJECTED earnings (quotes, estimates, planned charges, e.g., "quote is 43000", "updated quote to 43000", "will charge 8000", "estimated 5000", "total will be 10000")
+- reminders: List of reminder objects with text, due_date, and type. Extract reminders like "return Monday", "call client tomorrow", "follow up Friday", "check back next week"
+- shopping_items: List of items to buy (e.g., "need to buy 3 elbows", "bring plunger", "get new tap washers", "buy drain snake")
 
 Rules:
 - Only extract entities that are clearly mentioned in the text
@@ -422,6 +438,12 @@ Rules:
 - For dates: Preserve the format as mentioned (e.g., "Friday 17th", "next Monday")
 - For locations: Use proper capitalization (e.g., "Karen", "Parklands", "Kilimani")
 - For job_types: Extract explicit job types mentioned (e.g., "plumbing", "electrical", "carpentry", "repair", "installation", "maintenance", "blocked drain", "leaked tap" can indicate "plumbing")
+- For expenses: Extract ACTUAL expenses - money already spent (past tense: "bought", "spent", "paid", "I paid"). Do NOT include future costs or estimates.
+- For earnings: Extract ACTUAL earnings - money already received (past tense: "paid", "received", "got paid", "they paid me"). Do NOT include quotes or estimates.
+- For projected_expenses: Extract PROJECTED expenses - future costs, estimates, planned spending (future tense: "will cost", "adds to", "estimated", "that adds KES X to the cost")
+- For projected_earnings: Extract PROJECTED earnings - quotes, estimates, planned charges (e.g., "quote is", "updated quote to", "will charge", "estimated", "total will be")
+- For reminders: Extract action items with due dates. Type can be "follow_up", "call", "return", "check", "meeting", etc.
+- For shopping_items: Extract items that need to be purchased (e.g., "need 3 elbows", "bring plunger", "get tap washers")
 - Return empty arrays [] if no entities found for a category
 - Do NOT extract false positives like "Friday the" as a client name, or "Quick update" as a name
 
@@ -433,7 +455,16 @@ Return JSON in this exact format:
   "parts": ["P-trap", "ball valve"],
   "client_names": ["Sarah Mdoni", "David Ochieng"],
   "job_types": ["plumbing", "carpentry"],
-  "locations": ["Karen", "Parklands"]
+  "locations": ["Karen", "Parklands"],
+  "expenses": ["spent 2000 on materials", "bought parts for 1500"],
+  "earnings": ["client paid 5000", "received 8000"],
+  "projected_expenses": ["will cost 3000", "adds 2000 to materials"],
+  "projected_earnings": ["quote is 43000", "will charge 8000"],
+  "reminders": [
+    {{"text": "return Monday", "due_date": "Monday", "type": "follow_up"}},
+    {{"text": "call client tomorrow", "due_date": "tomorrow", "type": "call"}}
+  ],
+  "shopping_items": ["3 elbows", "plunger", "new tap washers"]
 }}"""
 
 		logger.info(f"[NLP-LLM] Sending request to OpenAI GPT-4o-mini...")
@@ -462,6 +493,12 @@ Return JSON in this exact format:
 			client_names=result_json.get("client_names", []),
 			job_types=result_json.get("job_types", []),
 			locations=result_json.get("locations", []),
+			expenses=result_json.get("expenses", []),
+			earnings=result_json.get("earnings", []),
+			projected_expenses=result_json.get("projected_expenses", []),
+			projected_earnings=result_json.get("projected_earnings", []),
+			reminders=result_json.get("reminders", []),
+			shopping_items=result_json.get("shopping_items", []),
 		)
 		
 		logger.info(f"[NLP-LLM] Successfully extracted entities - "
@@ -471,7 +508,13 @@ Return JSON in this exact format:
 		           f"Parts: {nlp_response.parts} | "
 		           f"Job Types: {nlp_response.job_types} | "
 		           f"Locations: {nlp_response.locations} | "
-		           f"Client Names: {nlp_response.client_names}")
+		           f"Client Names: {nlp_response.client_names} | "
+		           f"Expenses: {nlp_response.expenses} | "
+		           f"Earnings: {nlp_response.earnings} | "
+		           f"Projected Expenses: {nlp_response.projected_expenses} | "
+		           f"Projected Earnings: {nlp_response.projected_earnings} | "
+		           f"Reminders: {len(nlp_response.reminders)} | "
+		           f"Shopping Items: {nlp_response.shopping_items}")
 		
 		return nlp_response
 	except json.JSONDecodeError as e:
@@ -487,27 +530,43 @@ def extract_entities(text: str, region: str = "KE") -> NLPResponse:
 	Extract entities from text using LLM if available, otherwise regex.
 	This is a shared function that can be used by both /nlp/tag and link_suggestions.
 	Uses Redis caching to avoid duplicate LLM calls for the same text.
+	Different voice notes (different text) will have different hashes and will fetch fresh data.
 	"""
-	# Create cache key from text hash
+	# Create cache key from text hash (different text = different hash = new fetch)
 	text_hash = hashlib.sha256(f"{text}:{region}".encode()).hexdigest()
 	cache_key = f"nlp:extract:{text_hash}"
+	text_preview = text[:100].replace('\n', ' ') if len(text) > 100 else text.replace('\n', ' ')
+	
+	logger.info(f"[NLP-Cache] Checking cache for text (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
 	
 	# Try to get from cache first
 	try:
 		redis_client = get_redis()
 		cached = redis_client.get(cache_key)
 		if cached:
-			logger.info(f"[NLP-Cache] Cache hit for text hash: {text_hash[:16]}...")
+			logger.info(f"[NLP-Cache] ✅ CACHE HIT - Using cached data (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
+			logger.info(f"[NLP-Cache] ⚡ Skipping LLM call - returning cached result (saved cost & latency)")
 			cached_data = json.loads(cached)
-			return NLPResponse(**cached_data)
+			result = NLPResponse(**cached_data)
+			logger.info(f"[NLP-Cache] Cached result: Phones={len(result.phones)}, Amounts={len(result.amounts)}, "
+			           f"ClientNames={len(result.client_names)}, JobTypes={len(result.job_types)}")
+			return result
+		else:
+			logger.info(f"[NLP-Cache] ❌ CACHE MISS - No cached data found (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
+			logger.info(f"[NLP-Cache] 🔄 This is a NEW voice note - will fetch fresh data from LLM")
 	except Exception as e:
 		logger.warning(f"[NLP-Cache] Redis error (continuing without cache): {e}")
+		logger.info(f"[NLP-Cache] ⚠️  Cache unavailable - will proceed with fresh LLM fetch")
 	
 	# Try LLM first if API key is configured
+	logger.info(f"[NLP-Cache] 🚀 Making NEW LLM API call for text (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
 	llm_result = _extract_entities_with_llm(text, region)
 	
 	if llm_result is not None:
-		# Cache the LLM result for 1 hour
+		# Cache the LLM result for 24 hours (86400 seconds)
+		# This ensures identical voice notes don't trigger duplicate LLM calls
+		# Different voice notes will have different hashes and will fetch fresh data
+		cache_ttl = 86400  # 24 hours
 		try:
 			redis_client = get_redis()
 			cache_data = {
@@ -518,16 +577,23 @@ def extract_entities(text: str, region: str = "KE") -> NLPResponse:
 				"job_types": llm_result.job_types,
 				"locations": llm_result.locations,
 				"client_names": llm_result.client_names,
+				"expenses": llm_result.expenses,
+				"earnings": llm_result.earnings,
+				"projected_expenses": llm_result.projected_expenses,
+				"projected_earnings": llm_result.projected_earnings,
+				"reminders": llm_result.reminders,
+				"shopping_items": llm_result.shopping_items,
 			}
-			redis_client.setex(cache_key, 3600, json.dumps(cache_data))  # 1 hour TTL
-			logger.info(f"[NLP-Cache] Cached LLM result for text hash: {text_hash[:16]}...")
+			redis_client.setex(cache_key, cache_ttl, json.dumps(cache_data))
+			logger.info(f"[NLP-Cache] 💾 Cached NEW LLM result (hash: {text_hash[:16]}... | TTL: {cache_ttl}s / 24h | preview: \"{text_preview}...\")")
+			logger.info(f"[NLP-Cache] ✅ Future identical voice notes will use cache (saves cost & latency)")
 		except Exception as e:
 			logger.warning(f"[NLP-Cache] Failed to cache result: {e}")
 		
 		return llm_result
 	
 	# Fallback to regex-based extraction
-	logger.info("[NLP] LLM not available, using regex-based extraction")
+	logger.info(f"[NLP-Regex] ⚠️  LLM not available, using regex-based extraction (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
 	
 	phones = _extract_phones(text, region)
 	amounts = _extract_amounts(text)
@@ -556,9 +622,16 @@ def extract_entities(text: str, region: str = "KE") -> NLPResponse:
 		job_types=job_types,
 		locations=locations,
 		client_names=client_names,
+		expenses=[],  # Regex fallback doesn't extract expenses/earnings/reminders
+		earnings=[],
+		projected_expenses=[],
+		projected_earnings=[],
+		reminders=[],
+		shopping_items=[],
 	)
 	
-	# Cache regex result too (shorter TTL - 15 minutes)
+	# Cache regex result too (1 hour TTL - 3600 seconds)
+	cache_ttl = 3600  # 1 hour
 	try:
 		redis_client = get_redis()
 		cache_data = {
@@ -569,8 +642,15 @@ def extract_entities(text: str, region: str = "KE") -> NLPResponse:
 			"job_types": result.job_types,
 			"locations": result.locations,
 			"client_names": result.client_names,
+			"expenses": result.expenses,
+			"earnings": result.earnings,
+			"projected_expenses": result.projected_expenses,
+			"projected_earnings": result.projected_earnings,
+			"reminders": result.reminders,
+			"shopping_items": result.shopping_items,
 		}
-		redis_client.setex(cache_key, 900, json.dumps(cache_data))  # 15 minutes TTL
+		redis_client.setex(cache_key, cache_ttl, json.dumps(cache_data))
+		logger.info(f"[NLP-Cache] 💾 Cached regex result (hash: {text_hash[:16]}... | TTL: {cache_ttl}s / 1h | preview: \"{text_preview}...\")")
 	except Exception as e:
 		logger.warning(f"[NLP-Cache] Failed to cache regex result: {e}")
 	
@@ -580,5 +660,6 @@ def extract_entities(text: str, region: str = "KE") -> NLPResponse:
 @router.post("/tag", response_model=NLPResponse)
 async def tag_entities(payload: NLPRequest, current_user: User = Depends(get_current_user)):
 	"""Extract entities from text. Uses LLM if available, falls back to regex."""
-	logger.info(f"[NLP] Extracting entities from text (length: {len(payload.text)}): {payload.text[:200]}...")
+	logger.info(f"[NLP] 📝 Received entity extraction request (text length: {len(payload.text)} chars)")
+	logger.info(f"[NLP] 📄 Text preview: \"{payload.text[:150].replace(chr(10), ' ')}...\"")
 	return extract_entities(payload.text, payload.region or "KE")
