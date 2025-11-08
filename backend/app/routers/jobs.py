@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Set
 from uuid import UUID
+import logging
 
 from backend.app.db import get_db
 from backend.app.models import Job, Client, User, Note
@@ -14,6 +15,7 @@ from backend.app.settings import settings
 from backend.app.routers.nlp import _extract_phones, _extract_amounts, _extract_dates, _extract_parts, extract_entities
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=JobOut)
@@ -35,6 +37,28 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db), current_user: 
 @router.get("", response_model=List[JobOut])
 def list_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
 	return db.query(Job).filter(Job.owner_id == current_user.id).order_by(Job.created_at.desc()).all()
+
+
+@router.delete("/all", status_code=status.HTTP_200_OK)
+def delete_all_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+	"""
+	Delete all jobs for the current user.
+	This will cascade delete associated notes and their media files.
+	Reminders linked to these jobs will have their job_id set to NULL.
+	"""
+	jobs = db.query(Job).filter(Job.owner_id == current_user.id).all()
+	count = len(jobs)
+	
+	for job in jobs:
+		db.delete(job)
+	
+	db.commit()
+	logger.info(f"Deleted {count} jobs for user {current_user.id}")
+	
+	return {
+		"message": f"Deleted {count} jobs",
+		"count": count
+	}
 
 
 @router.get("/{job_id}", response_model=JobOut)
@@ -210,25 +234,172 @@ def get_job_financial(
 		# Extract entities using NLP (will use cache if available)
 		entities = extract_entities(note.text, "KE")
 		
+		# Track processed amounts to avoid double-counting
+		processed_amounts = set()
+		
 		# Process ACTUAL earnings
 		for earning_str in entities.earnings:
 			amount = extract_amount_value(earning_str)
 			total_earnings += amount
+			processed_amounts.add(amount)
 		
 		# Process ACTUAL expenses
 		for expense_str in entities.expenses:
 			amount = extract_amount_value(expense_str)
 			total_expenses += amount
+			processed_amounts.add(amount)
 		
-		# Process PROJECTED earnings (quotes, estimates)
-		for earning_str in entities.projected_earnings:
-			amount = extract_amount_value(earning_str)
-			total_projected_earnings += amount
-		
-		# Process PROJECTED expenses (planned costs, estimates)
+		# Process PROJECTED expenses FIRST (planned costs, estimates)
+		# Filter out labor charges that LLM incorrectly categorized as expenses
+		note_projected_expenses = 0.0
+		labor_charges_from_expenses = []  # Track labor charges that were misclassified
 		for expense_str in entities.projected_expenses:
-			amount = extract_amount_value(expense_str)
-			total_projected_expenses += amount
+			expense_lower = expense_str.lower()
+			# Check if this is actually a labor charge (common LLM mistake)
+			if any(phrase in expense_lower for phrase in ["labor charges", "labour charges", "labor fees", "labour fees", "charges will be", "charges are"]):
+				# This is a labor charge, not an expense - move it to earnings
+				amount = extract_amount_value(expense_str)
+				labor_charges_from_expenses.append(amount)
+				processed_amounts.add(amount)
+			else:
+				# This is a legitimate projected expense
+				amount = extract_amount_value(expense_str)
+				total_projected_expenses += amount
+				note_projected_expenses += amount
+				processed_amounts.add(amount)
+		
+		# Fallback: Process uncategorized amounts to capture expenses that LLM missed
+		# This MUST run BEFORE calculating earnings from total quote
+		# First, identify total quote and labor charges amounts to exclude them from fallback processing
+		pre_identified_total_quote = None
+		pre_identified_labor_charges = None
+		for earning_str in entities.projected_earnings:
+			earning_lower = earning_str.lower()
+			amount = extract_amount_value(earning_str)
+			if any(phrase in earning_lower for phrase in ["total quote", "quote is", "quote to", "total will be", "revised quote", "updated quote", "total pot", "total cut"]):
+				pre_identified_total_quote = amount
+			elif any(phrase in earning_lower for phrase in ["labor charges", "labour charges", "labor fees", "labour fees", "charges will be", "charges are"]):
+				pre_identified_labor_charges = amount
+		
+		note_lower = note.text.lower()
+		for amount_str in entities.amounts:
+			amount_value = extract_amount_value(amount_str)
+			# Skip if already categorized or zero
+			if amount_value in processed_amounts or amount_value == 0.0:
+				continue
+			
+			# EXCLUDE amounts that are part of total quote or labor charges (identified from projected_earnings)
+			if amount_value == pre_identified_total_quote or amount_value == pre_identified_labor_charges:
+				# These will be handled in the projected earnings calculation below
+				processed_amounts.add(amount_value)
+				continue
+			
+			# Find the context around this amount in the note text
+			amount_str_lower = amount_str.lower()
+			amount_pos = note_lower.find(amount_str_lower)
+			
+			# Get context around the amount (100 chars before and after)
+			if amount_pos >= 0:
+				context_start = max(0, amount_pos - 100)
+				context_end = min(len(note_lower), amount_pos + len(amount_str_lower) + 100)
+				context = note_lower[context_start:context_end]
+			else:
+				# Fallback to entire note if amount string not found
+				context = note_lower
+			
+			# EXCLUDE amounts that are clearly part of total quote or labor charges based on context
+			if any(phrase in context for phrase in ["total quote", "quote is", "total pot", "total cut", "my total quote", "so my total"]):
+				# This is a total quote amount - will be handled in projected earnings calculation
+				processed_amounts.add(amount_value)
+				continue
+			if any(phrase in context for phrase in ["labor charges", "labour charges", "labor fees", "labour fees", "charges will be", "charges are"]):
+				# This is a labor charge amount - will be handled in projected earnings calculation
+				processed_amounts.add(amount_value)
+				continue
+			
+			# EXCLUDE profit amounts - profit is calculated, not a separate earning/expense
+			if any(word in context for word in ["profit", "profit of", "made a profit", "profit after", "profit is"]):
+				# This is a profit amount, not an earning or expense - skip it
+				processed_amounts.add(amount_value)
+				continue
+			
+			# Check for expense indicators first
+			if any(word in context for word in ["will cost", "costs", "cost roughly", "cost about", "adds to", "adds kes"]):
+				# Projected expense - add to note_projected_expenses so it's included in earnings calculation
+				total_projected_expenses += amount_value
+				note_projected_expenses += amount_value
+				processed_amounts.add(amount_value)
+			elif any(word in context for word in ["spent", "paid for"]):
+				# Actual expense
+				total_expenses += amount_value
+				processed_amounts.add(amount_value)
+			elif any(word in context for word in ["paid", "received", "got paid", "they paid", "client paid", "gave me", "deposit"]):
+				# Actual earnings - but only if not in a profit context
+				# Check if this amount is mentioned in a profit calculation context
+				profit_context_words = ["profit", "profit of", "made a profit", "profit after", "profit is"]
+				if not any(word in context for word in profit_context_words):
+					total_earnings += amount_value
+					processed_amounts.add(amount_value)
+			# Note: We don't add uncategorized amounts to projected_earnings here
+			# because they might be part of a total quote, which we handle below
+		
+		# NOW calculate projected earnings AFTER fallback has captured all expenses
+		# Process PROJECTED earnings (quotes, estimates)
+		# If we have total quote, use quote - expenses (profit)
+		# If we have labor charges but no total quote, use labor charges
+		# Otherwise, use what the LLM extracted
+		total_quote_amount = None
+		labor_charges_amount = None
+		other_projected_earnings = []
+		
+		# Include labor charges that were incorrectly categorized as expenses
+		for amount in labor_charges_from_expenses:
+			if labor_charges_amount is None:
+				labor_charges_amount = amount
+			else:
+				# If we already have labor charges, add to other earnings
+				other_projected_earnings.append(amount)
+		
+		for earning_str in entities.projected_earnings:
+			earning_lower = earning_str.lower()
+			amount = extract_amount_value(earning_str)
+			
+			# Check if this is a "total quote" (includes everything: materials + labor)
+			# Also check for variations like "total pot", "total cut" (transcription errors)
+			if any(phrase in earning_lower for phrase in ["total quote", "quote is", "quote to", "total will be", "revised quote", "updated quote", "total pot", "total cut"]):
+				total_quote_amount = amount
+			# Check if this is labor charges (the actual earnings/profit)
+			elif any(phrase in earning_lower for phrase in ["labor charges", "labour charges", "labor fees", "labour fees", "charges will be", "charges are"]):
+				labor_charges_amount = amount
+			else:
+				# Other projected earnings
+				other_projected_earnings.append(amount)
+		
+		# Calculate projected earnings: if we have total quote, use quote - expenses (profit)
+		# If we have labor charges but no total quote, use labor charges
+		# Otherwise, use other projected earnings
+		if total_quote_amount is not None:
+			# We have a total quote - earnings = quote - expenses (profit after material costs)
+			# note_projected_expenses now includes fallback amounts
+			projected_earnings_for_note = total_quote_amount - note_projected_expenses
+			if projected_earnings_for_note < 0:
+				projected_earnings_for_note = 0.0
+			processed_amounts.add(total_quote_amount)
+			if labor_charges_amount is not None:
+				processed_amounts.add(labor_charges_amount)  # Mark labor charges as processed to avoid double-counting
+		elif labor_charges_amount is not None:
+			# No total quote, but we have labor charges - use labor charges as earnings
+			projected_earnings_for_note = labor_charges_amount
+			processed_amounts.add(labor_charges_amount)
+		else:
+			# No total quote or labor charges, use other projected earnings
+			projected_earnings_for_note = sum(other_projected_earnings)
+			for amount in other_projected_earnings:
+				processed_amounts.add(amount)
+		
+		# Add calculated earnings to totals
+		if projected_earnings_for_note > 0:
+			total_projected_earnings += projected_earnings_for_note
 	
 	# Calculate profits
 	net_profit = total_earnings - total_expenses

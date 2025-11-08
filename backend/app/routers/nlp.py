@@ -1,6 +1,6 @@
 #NLP is Natural Language Processing
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel
 from typing import List, Optional
 import re
@@ -411,60 +411,151 @@ def _extract_entities_with_llm(text: str, region: str = "KE") -> Optional[NLPRes
 	try:
 		client = OpenAI(api_key=api_key)
 		
-		prompt = f"""Extract structured job data from this voice note transcription. The context is blue-collar work in Kenya (plumbing, electrical, carpentry, constructions, mechanic, driver, fundis,
-		tailors ).
+		prompt = f"""Extract structured job data from this voice note transcription. The context is blue-collar work in Kenya (plumbing, electrical, carpentry, construction, masonry, welding, tailoring, painting, roofing, tiling, landscaping, etc.).
 
 Text: "{text}"
 
 Extract the following entities and return ONLY valid JSON (no markdown, no explanation):
-- phones: List of phone numbers (format: +254XXXXXXXXX or 07XXXXXXXX)
-- amounts: List of monetary amounts mentioned (in Kenyan shillings, KES, Ksh, etc.)
-- dates: List of dates mentioned (e.g., "Monday", "Friday 17th", "15th January 2025", "next Friday")
-- parts: List of parts/tools/materials mentioned (e.g., "P-trap", "MCB", "wire", "cabinet")
-- client_names: List of client/customer names mentioned (e.g., "Sarah", "David Ochieng", "Mama Akinyi")
-- job_types: List of job types mentioned (e.g., "plumbing", "electrical", "carpentry", "repair", "installation", "maintenance")
-- locations: List of locations/areas mentioned (e.g., "Karen", "Parklands", "Nairobi", "Kilimani")
-- expenses: List of ACTUAL expenses (money already spent, e.g., "bought materials for 2000", "spent 500 on transport", "paid 1500 for parts", "I paid 2000")
-- earnings: List of ACTUAL earnings (money already received, e.g., "client paid 5000", "received 8000", "got paid 3000", "they paid me 5000")
-- projected_expenses: List of PROJECTED/PLANNED expenses (future costs, quotes, estimates, e.g., "will cost 3000", "adds 2000 to materials", "estimated 1500", "that adds KES 3000 to the cost")
-- projected_earnings: List of PROJECTED earnings (quotes, estimates, planned charges, e.g., "quote is 43000", "updated quote to 43000", "will charge 8000", "estimated 5000", "total will be 10000")
-- reminders: List of reminder objects with text, due_date, and type. Extract reminders like "return Monday", "call client tomorrow", "follow up Friday", "check back next week"
-- shopping_items: List of items to buy (e.g., "need to buy 3 elbows", "bring plunger", "get new tap washers", "buy drain snake")
 
-Rules:
+ENTITY CATEGORIES:
+
+1. phones: List of phone numbers (format: +254XXXXXXXXX or 07XXXXXXXX or 07XX-XXX-XXX)
+   Examples: ["0798123456", "0789234567", "+254712345678"]
+
+2. amounts: List of ALL monetary amounts mentioned (in Kenyan shillings, KES, Ksh, etc.)
+   Examples: ["1800", "300", "5000", "45000", "20000", "65000"]
+
+3. dates: List of dates mentioned (e.g., "Monday", "Friday 17th", "15th of February", "next Friday", "tomorrow", "next week")
+   Examples: ["Tuesday", "Sunday", "15th of February", "20th of February", "next week", "two weeks", "6 months"]
+
+4. parts: List of parts/tools/materials mentioned
+   Examples: ["premium thread", "zippers", "bricks", "cement", "iron sheets", "gutters", "ceramic tiles", "grout", "tile adhesive"]
+
+5. client_names: List of client/customer names mentioned
+   IMPORTANT: Extract names accurately - preserve exact spelling. If you see "Collins Otieno" extract it as "Collins Otieno" not "Colin Sotieno". 
+   If you see "Call Collins" or "follow up with Collins", extract "Collins" as a client name.
+   Examples: ["Beatrice Nyambura", "Collins Otieno", "Grace Wambui", "Francis Kariuki", "Lucy", "Joseph Mutua", "Agnes Njeri"]
+
+6. job_types: List of job types mentioned
+   Examples: ["tailoring", "masonry", "welding", "tiling", "painting", "roofing", "landscaping", "plumbing", "electrical", "carpentry"]
+
+7. locations: List of locations/areas mentioned
+   Examples: ["Runda", "Ngong", "Thika", "Ruaka", "Kasarani", "Kiambu", "Limuru"]
+
+8. expenses: List of ACTUAL expenses (money already spent - past tense)
+   Key indicators: "spent", "paid", "bought", "purchased", "I paid", "I spent", "I bought"
+   Examples: 
+   - "spent 1,800 shillings on premium thread and zippers"
+   - "paid 300 shillings for a matatu ride"
+   - "bought iron sheets for 22,000 shillings"
+   - "purchased some foundation materials for 12,000 shillings last week"
+   - "spent 2,000 shillings on transport today"
+   - "paid 800 shillings for parking today"
+   - "Spent 35,000 shillings on plants and soil"
+   - "Paid 4,500 shillings for delivery"
+   - "spent 8,000 shillings on some initial metal sheets"
+   Do NOT include: future costs, estimates, profit amounts, labor charges
+
+9. earnings: List of ACTUAL earnings (money already received - past tense)
+   Key indicators: "paid me", "received", "got paid", "gave me", "sent me", "client paid", "they paid"
+   Examples:
+   - "client gave me 5,000 shillings as deposit"
+   - "client paid me 35,000 shillings for the completed work"
+   - "received 15,000 shillings from the client today as advance payment"
+   - "client paid me 40,000 shillings for the roofing service"
+   - "received 80,000 shillings as the first payment"
+   - "client has sent me 20,000 shillings"
+   Do NOT include: quotes, estimates, profit amounts
+
+10. projected_expenses: List of PROJECTED/PLANNED expenses (future costs, estimates)
+    Key indicators: "will cost", "will cost roughly", "costs roughly", "cost roughly", "adds to", "estimated", "worth about", "approximately"
+    Examples:
+    - "total alteration cost will be around 4,500 shillings including materials"
+    - "bricks and cement will cost roughly 45,000 Kenyan shillings"
+    - "increases the material cost by KES 8,000"
+    - "materials will cost approximately 18,000 shillings"
+    - "additional paint and brushes will cost about 7,500 shillings"
+    - "additional plants and irrigation pipes worth about 45,000 shillings"
+    CRITICAL: Do NOT extract "labor charges", "labour charges", "labor fees", or "labour fees" as projected_expenses - these are ALWAYS projected_earnings.
+
+11. projected_earnings: List of PROJECTED earnings (quotes, estimates, planned charges, labor charges/fees)
+    Key indicators: "quote is", "quoted at", "total quote", "total pot", "total cut", "total will be", "revised quote", "updated quote", "will pay", "will charge", "labor charges", "labour charges"
+    Examples:
+    - "total quote is 65,000 Kenyan shillings"
+    - "Labour charges will be 20,000 shillings"
+    - "revised the quote to KES 73,000 total"
+    - "they'll pay 45,000 shillings once the tiling is complete"
+    - "Total project value is 55,000 shillings"
+    - "total project quote is 280,000 shillings"
+    - "total job is quoted at 50,000 shillings"
+    IMPORTANT: If both "total quote" (or variations like "total pot", "total cut") and "labor charges" are mentioned, extract BOTH separately.
+    CRITICAL: "labor charges", "labour charges", "labor fees", "labour fees" are NEVER expenses - they are ALWAYS projected_earnings.
+
+12. reminders: List of reminder objects with text, due_date, and type
+    Extract ALL action items with due dates or timeframes. Types: "call", "return", "follow_up", "check", "meeting", "remind"
+    Examples:
+    - {{"text": "return on Tuesday for the final fitting", "due_date": "Tuesday", "type": "return"}}
+    - {{"text": "call her on Sunday to confirm the appointment time", "due_date": "Sunday", "type": "call"}}
+    - {{"text": "Follow up with Collins on Thursday to finalize the contract", "due_date": "Thursday", "type": "follow_up"}}
+    - {{"text": "Call Collins at 0789234567 to confirm", "due_date": "soon", "type": "call"}}
+    - {{"text": "Check back next week to see if they've signed the contract", "due_date": "next week", "type": "check"}}
+    - {{"text": "return in two weeks to check on the gate hinges and apply rust protection", "due_date": "two weeks", "type": "return"}}
+    - {{"text": "call them tomorrow to schedule when to start", "due_date": "tomorrow", "type": "call"}}
+    - {{"text": "return on Wednesday to continue painting", "due_date": "Wednesday", "type": "return"}}
+    - {{"text": "follow up with the client on Monday to confirm the color choices", "due_date": "Monday", "type": "follow_up"}}
+    - {{"text": "Check the first coat on Friday to see if it needs a second layer", "due_date": "Friday", "type": "check"}}
+    - {{"text": "call them next week to check if there are any leaks", "due_date": "next week", "type": "call"}}
+    - {{"text": "remind them to come back in 6 months for roof maintenance inspection", "due_date": "6 months", "type": "follow_up"}}
+    - {{"text": "meet with the client on Thursday to discuss the garden design", "due_date": "Thursday", "type": "meeting"}}
+    - {{"text": "call the nursery tomorrow to order the next batch of plants", "due_date": "tomorrow", "type": "call"}}
+    - {{"text": "Check the site on Monday to ensure the soil preparation is complete", "due_date": "Monday", "type": "check"}}
+    - {{"text": "return to the Ruaka job site on Friday to check the tile alignment", "due_date": "Friday", "type": "return"}}
+    - {{"text": "call them before I go to confirm they'll be home", "due_date": "before Friday", "type": "call"}}
+    IMPORTANT: Extract every reminder mentioned, even if multiple reminders are in one note. Include the full reminder text.
+
+13. shopping_items: List of items to buy/bring/get
+    Key indicators: "need to buy", "bring", "get", "buy", "need", "bring when I go back"
+    Examples:
+    - ["ceramic tiles", "grout", "tile adhesive", "tile cutter", "leveling tools"]
+    - ["rust protection"]
+    - ["quality sand", "ballast"]
+    - ["3 elbows", "plunger", "new tap washers", "drain snake"]
+
+EXTRACTION RULES:
 - Only extract entities that are clearly mentioned in the text
-- For client names: Extract full names when possible (e.g., "David Ochieng" not just "David")
-- For amounts: Include currency context if mentioned (e.g., "8000 Kenyan shillings" or just "8000" if context is clear)
-- For dates: Preserve the format as mentioned (e.g., "Friday 17th", "next Monday")
-- For locations: Use proper capitalization (e.g., "Karen", "Parklands", "Kilimani")
-- For job_types: Extract explicit job types mentioned (e.g., "plumbing", "electrical", "carpentry", "repair", "installation", "maintenance", "blocked drain", "leaked tap" can indicate "plumbing")
-- For expenses: Extract ACTUAL expenses - money already spent (past tense: "bought", "spent", "paid", "I paid"). Do NOT include future costs or estimates.
-- For earnings: Extract ACTUAL earnings - money already received (past tense: "paid", "received", "got paid", "they paid me"). Do NOT include quotes or estimates.
-- For projected_expenses: Extract PROJECTED expenses - future costs, estimates, planned spending (future tense: "will cost", "adds to", "estimated", "that adds KES X to the cost")
-- For projected_earnings: Extract PROJECTED earnings - quotes, estimates, planned charges (e.g., "quote is", "updated quote to", "will charge", "estimated", "total will be")
-- For reminders: Extract action items with due dates. Type can be "follow_up", "call", "return", "check", "meeting", etc.
-- For shopping_items: Extract items that need to be purchased (e.g., "need 3 elbows", "bring plunger", "get tap washers")
+- For client names: Extract full names when possible. Preserve exact spelling and spacing.
+- For amounts: Include currency context if mentioned, otherwise just the number
+- For dates: Preserve the format as mentioned (e.g., "15th of February", "next week", "two weeks")
+- For locations: Use proper capitalization
+- For job_types: Extract explicit job types mentioned
+- For expenses: ONLY past tense actual expenses. Do NOT include profit amounts.
+- For earnings: ONLY past tense actual earnings. Do NOT include profit amounts.
+- For projected_expenses: ONLY future costs/estimates. NEVER include labor charges.
+- For projected_earnings: Quotes, estimates, labor charges. Include phrases like "total project value", "total job is quoted at".
+- For reminders: Extract ALL action items with due dates. Include full reminder text.
+- For shopping_items: Extract items mentioned with buying/bringing indicators.
 - Return empty arrays [] if no entities found for a category
 - Do NOT extract false positives like "Friday the" as a client name, or "Quick update" as a name
 
 Return JSON in this exact format:
 {{
-  "phones": ["+254712345678"],
-  "amounts": ["8000 Kenyan shillings", "2000"],
-  "dates": ["Friday 17th", "next Monday"],
-  "parts": ["P-trap", "ball valve"],
-  "client_names": ["Sarah Mdoni", "David Ochieng"],
-  "job_types": ["plumbing", "carpentry"],
-  "locations": ["Karen", "Parklands"],
-  "expenses": ["spent 2000 on materials", "bought parts for 1500"],
-  "earnings": ["client paid 5000", "received 8000"],
-  "projected_expenses": ["will cost 3000", "adds 2000 to materials"],
-  "projected_earnings": ["quote is 43000", "will charge 8000"],
+  "phones": ["0798123456", "0789234567"],
+  "amounts": ["1800", "300", "5000", "45000", "20000", "65000"],
+  "dates": ["Tuesday", "Sunday", "15th of February", "next week"],
+  "parts": ["premium thread", "zippers", "bricks", "cement"],
+  "client_names": ["Beatrice Nyambura", "Collins Otieno", "Grace Wambui"],
+  "job_types": ["tailoring", "masonry", "welding"],
+  "locations": ["Runda", "Ngong", "Thika"],
+  "expenses": ["spent 1,800 shillings on premium thread and zippers", "paid 300 shillings for a matatu ride"],
+  "earnings": ["client gave me 5,000 shillings as deposit"],
+  "projected_expenses": ["total alteration cost will be around 4,500 shillings including materials", "bricks and cement will cost roughly 45,000 Kenyan shillings"],
+  "projected_earnings": ["total quote is 65,000 Kenyan shillings", "Labour charges will be 20,000 shillings"],
   "reminders": [
-    {{"text": "return Monday", "due_date": "Monday", "type": "follow_up"}},
-    {{"text": "call client tomorrow", "due_date": "tomorrow", "type": "call"}}
+    {{"text": "return on Tuesday for the final fitting", "due_date": "Tuesday", "type": "return"}},
+    {{"text": "call her on Sunday to confirm the appointment time", "due_date": "Sunday", "type": "call"}},
+    {{"text": "Follow up with Collins on Thursday to finalize the contract", "due_date": "Thursday", "type": "follow_up"}}
   ],
-  "shopping_items": ["3 elbows", "plunger", "new tap washers"]
+  "shopping_items": ["ceramic tiles", "grout", "tile adhesive", "tile cutter", "leveling tools"]
 }}"""
 
 		logger.info(f"[NLP-LLM] Sending request to OpenAI GPT-4o-mini...")
@@ -525,38 +616,54 @@ Return JSON in this exact format:
 		return None
 
 
-def extract_entities(text: str, region: str = "KE") -> NLPResponse:
+def extract_entities(text: str, region: str = "KE", force_refresh: bool = False) -> NLPResponse:
 	"""
 	Extract entities from text using LLM if available, otherwise regex.
 	This is a shared function that can be used by both /nlp/tag and link_suggestions.
 	Uses Redis caching to avoid duplicate LLM calls for the same text.
 	Different voice notes (different text) will have different hashes and will fetch fresh data.
+	
+	Args:
+		text: The text to extract entities from
+		region: The region code (default: "KE")
+		force_refresh: If True, bypass cache and force fresh extraction
 	"""
 	# Create cache key from text hash (different text = different hash = new fetch)
 	text_hash = hashlib.sha256(f"{text}:{region}".encode()).hexdigest()
 	cache_key = f"nlp:extract:{text_hash}"
 	text_preview = text[:100].replace('\n', ' ') if len(text) > 100 else text.replace('\n', ' ')
 	
-	logger.info(f"[NLP-Cache] Checking cache for text (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
+	if force_refresh:
+		logger.info(f"[NLP-Cache] 🔄 FORCE REFRESH requested - bypassing cache (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
+		# Delete cache if it exists
+		try:
+			redis_client = get_redis()
+			redis_client.delete(cache_key)
+			logger.info(f"[NLP-Cache] 🗑️  Cleared cache for text (hash: {text_hash[:16]}...)")
+		except Exception as e:
+			logger.warning(f"[NLP-Cache] Failed to clear cache: {e}")
+	else:
+		logger.info(f"[NLP-Cache] Checking cache for text (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
 	
-	# Try to get from cache first
-	try:
-		redis_client = get_redis()
-		cached = redis_client.get(cache_key)
-		if cached:
-			logger.info(f"[NLP-Cache] ✅ CACHE HIT - Using cached data (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
-			logger.info(f"[NLP-Cache] ⚡ Skipping LLM call - returning cached result (saved cost & latency)")
-			cached_data = json.loads(cached)
-			result = NLPResponse(**cached_data)
-			logger.info(f"[NLP-Cache] Cached result: Phones={len(result.phones)}, Amounts={len(result.amounts)}, "
-			           f"ClientNames={len(result.client_names)}, JobTypes={len(result.job_types)}")
-			return result
-		else:
-			logger.info(f"[NLP-Cache] ❌ CACHE MISS - No cached data found (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
-			logger.info(f"[NLP-Cache] 🔄 This is a NEW voice note - will fetch fresh data from LLM")
-	except Exception as e:
-		logger.warning(f"[NLP-Cache] Redis error (continuing without cache): {e}")
-		logger.info(f"[NLP-Cache] ⚠️  Cache unavailable - will proceed with fresh LLM fetch")
+	# Try to get from cache first (unless force_refresh is True)
+	if not force_refresh:
+		try:
+			redis_client = get_redis()
+			cached = redis_client.get(cache_key)
+			if cached:
+				logger.info(f"[NLP-Cache] ✅ CACHE HIT - Using cached data (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
+				logger.info(f"[NLP-Cache] ⚡ Skipping LLM call - returning cached result (saved cost & latency)")
+				cached_data = json.loads(cached)
+				result = NLPResponse(**cached_data)
+				logger.info(f"[NLP-Cache] Cached result: Phones={len(result.phones)}, Amounts={len(result.amounts)}, "
+				           f"ClientNames={len(result.client_names)}, JobTypes={len(result.job_types)}")
+				return result
+			else:
+				logger.info(f"[NLP-Cache] ❌ CACHE MISS - No cached data found (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
+				logger.info(f"[NLP-Cache] 🔄 This is a NEW voice note - will fetch fresh data from LLM")
+		except Exception as e:
+			logger.warning(f"[NLP-Cache] Redis error (continuing without cache): {e}")
+			logger.info(f"[NLP-Cache] ⚠️  Cache unavailable - will proceed with fresh LLM fetch")
 	
 	# Try LLM first if API key is configured
 	logger.info(f"[NLP-Cache] 🚀 Making NEW LLM API call for text (hash: {text_hash[:16]}... | preview: \"{text_preview}...\")")
@@ -658,8 +765,100 @@ def extract_entities(text: str, region: str = "KE") -> NLPResponse:
 
 
 @router.post("/tag", response_model=NLPResponse)
-async def tag_entities(payload: NLPRequest, current_user: User = Depends(get_current_user)):
+async def tag_entities(
+	payload: NLPRequest,
+	force_refresh: bool = Query(False, description="Force fresh extraction, bypass cache"),
+	current_user: User = Depends(get_current_user)
+):
 	"""Extract entities from text. Uses LLM if available, falls back to regex."""
-	logger.info(f"[NLP] 📝 Received entity extraction request (text length: {len(payload.text)} chars)")
+	logger.info(f"[NLP] 📝 Received entity extraction request (text length: {len(payload.text)} chars, force_refresh={force_refresh})")
 	logger.info(f"[NLP] 📄 Text preview: \"{payload.text[:150].replace(chr(10), ' ')}...\"")
-	return extract_entities(payload.text, payload.region or "KE")
+	return extract_entities(payload.text, payload.region or "KE", force_refresh=force_refresh)
+
+
+@router.delete("/cache", status_code=status.HTTP_200_OK)
+async def clear_nlp_cache(
+	text: Optional[str] = Query(None, description="Clear cache for specific text (will hash it)"),
+	text_hash: Optional[str] = Query(None, description="Clear cache for specific hash (16+ characters)"),
+	all: bool = Query(False, description="Clear ALL NLP cache (use with caution)"),
+	current_user: User = Depends(get_current_user)
+):
+	"""
+	Clear NLP cache for debugging purposes.
+	Can clear cache for a specific text, a specific hash, or all NLP cache.
+	"""
+	try:
+		redis_client = get_redis()
+		cleared_count = 0
+		
+		if all:
+			# Clear all NLP cache keys
+			pattern = "nlp:extract:*"
+			keys = redis_client.keys(pattern)
+			if keys:
+				cleared_count = redis_client.delete(*keys)
+				logger.info(f"[NLP-Cache] 🗑️  Cleared ALL NLP cache: {cleared_count} keys deleted")
+				return {
+					"message": f"Cleared all NLP cache",
+					"keys_deleted": cleared_count
+				}
+			else:
+				logger.info(f"[NLP-Cache] ℹ️  No NLP cache keys found to clear")
+				return {
+					"message": "No NLP cache keys found",
+					"keys_deleted": 0
+				}
+		
+		elif text:
+			# Clear cache for specific text
+			text_hash = hashlib.sha256(f"{text}:KE".encode()).hexdigest()
+			cache_key = f"nlp:extract:{text_hash}"
+			if redis_client.exists(cache_key):
+				redis_client.delete(cache_key)
+				logger.info(f"[NLP-Cache] 🗑️  Cleared cache for text (hash: {text_hash[:16]}...)")
+				return {
+					"message": "Cache cleared for text",
+					"text_hash": text_hash[:16] + "...",
+					"keys_deleted": 1
+				}
+			else:
+				logger.info(f"[NLP-Cache] ℹ️  No cache found for text (hash: {text_hash[:16]}...)")
+				return {
+					"message": "No cache found for text",
+					"text_hash": text_hash[:16] + "...",
+					"keys_deleted": 0
+				}
+		
+		elif text_hash:
+			# Clear cache for specific hash
+			# Find all keys that start with this hash
+			pattern = f"nlp:extract:{text_hash}*"
+			keys = redis_client.keys(pattern)
+			if keys:
+				cleared_count = redis_client.delete(*keys)
+				logger.info(f"[NLP-Cache] 🗑️  Cleared cache for hash: {text_hash[:16]}... ({cleared_count} keys)")
+				return {
+					"message": "Cache cleared for hash",
+					"text_hash": text_hash[:16] + "...",
+					"keys_deleted": cleared_count
+				}
+			else:
+				logger.info(f"[NLP-Cache] ℹ️  No cache found for hash: {text_hash[:16]}...")
+				return {
+					"message": "No cache found for hash",
+					"text_hash": text_hash[:16] + "...",
+					"keys_deleted": 0
+				}
+		
+		else:
+			raise HTTPException(
+				status_code=status.HTTP_400_BAD_REQUEST,
+				detail="Must provide 'text', 'text_hash', or 'all=true' parameter"
+			)
+	
+	except Exception as e:
+		logger.error(f"[NLP-Cache] Error clearing cache: {e}", exc_info=True)
+		raise HTTPException(
+			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			detail=f"Failed to clear cache: {str(e)}"
+		)

@@ -8,6 +8,7 @@ import redis
 import uuid
 import logging
 import re
+import hashlib
 from datetime import datetime
 
 from backend.app.db import get_db
@@ -21,6 +22,89 @@ from backend.app.routers.nlp import extract_entities
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_phone(phone: str) -> str:
+	"""Normalize phone number by removing spaces, dashes, and other formatting."""
+	if not phone:
+		return ""
+	# Remove all non-digit characters except leading +
+	normalized = re.sub(r'[^\d+]', '', phone)
+	# Remove leading + if present (for international format)
+	if normalized.startswith('+'):
+		normalized = normalized[1:]
+	return normalized
+
+
+def name_similarity(name1: str, name2: str) -> float:
+	"""Calculate similarity between two names (0.0 to 1.0)."""
+	if not name1 or not name2:
+		return 0.0
+	name1_lower = name1.lower().strip()
+	name2_lower = name2.lower().strip()
+	
+	# Exact match
+	if name1_lower == name2_lower:
+		return 1.0
+	
+	# Check if one name contains the other (e.g., "Collins" in "Collins Otieno")
+	if name1_lower in name2_lower or name2_lower in name1_lower:
+		return 0.8
+	
+	# Use SequenceMatcher for fuzzy matching
+	from difflib import SequenceMatcher
+	similarity = SequenceMatcher(None, name1_lower, name2_lower).ratio()
+	return similarity
+
+
+def find_client_by_name_fuzzy(db: Session, user_id: UUID, name: str, min_similarity: float = 0.6) -> Optional[Client]:
+	"""Find a client by name using fuzzy matching."""
+	if not name:
+		return None
+	
+	# First try exact/partial match (case-insensitive)
+	clients = db.query(Client).filter(
+		Client.owner_id == user_id
+	).all()
+	
+	best_match = None
+	best_similarity = 0.0
+	
+	for client in clients:
+		# Check if extracted name matches client name (fuzzy)
+		similarity = name_similarity(name, client.name)
+		if similarity > best_similarity and similarity >= min_similarity:
+			best_similarity = similarity
+			best_match = client
+		
+		# Also check if client name contains extracted name or vice versa
+		# This handles cases like "Collins" matching "Collins Otieno"
+		if name.lower() in client.name.lower() or client.name.lower() in name.lower():
+			if similarity > best_similarity:
+				best_similarity = max(similarity, 0.7)  # Boost for substring matches
+				best_match = client
+	
+	return best_match if best_similarity >= min_similarity else None
+
+
+def find_client_by_phone_normalized(db: Session, user_id: UUID, phone: str) -> Optional[Client]:
+	"""Find a client by phone number using normalized comparison."""
+	if not phone:
+		return None
+	
+	normalized_phone = normalize_phone(phone)
+	if not normalized_phone:
+		return None
+	
+	# Get all clients and compare normalized phone numbers
+	clients = db.query(Client).filter(Client.owner_id == user_id).all()
+	for client in clients:
+		if client.phone:
+			client_phone_normalized = normalize_phone(client.phone)
+			if client_phone_normalized == normalized_phone:
+				return client
+	
+	return None
 
 
 def get_redis():
@@ -185,6 +269,28 @@ def update_transcription(
 def list_notes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
 	notes = db.query(Note).filter(Note.owner_id == current_user.id).order_by(Note.created_at.desc()).all()
 	return notes
+
+
+@router.delete("/all", status_code=status.HTTP_200_OK)
+def delete_all_notes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+	"""
+	Delete all notes for the current user.
+	This will cascade delete associated media files.
+	Reminders linked to these notes will have their note_id set to NULL.
+	"""
+	notes = db.query(Note).filter(Note.owner_id == current_user.id).all()
+	count = len(notes)
+	
+	for note in notes:
+		db.delete(note)
+	
+	db.commit()
+	logger.info(f"Deleted {count} notes for user {current_user.id}")
+	
+	return {
+		"message": f"Deleted {count} notes",
+		"count": count
+	}
 
 
 @router.post("/{note_id}/assign", response_model=NoteOut)
@@ -360,11 +466,8 @@ def get_link_suggestions(note_id: UUID, db: Session = Depends(get_db), current_u
 	
 	# Check for client name matches
 	for name in client_names:
-		# Check if client with this name already exists
-		existing_client = db.query(Client).filter(
-			Client.owner_id == current_user.id,
-			Client.name.ilike(f"%{name}%")
-		).first()
+		# Check if client with this name already exists (using fuzzy matching)
+		existing_client = find_client_by_name_fuzzy(db, current_user.id, name, min_similarity=0.6)
 		
 		if existing_client:
 			# Suggest linking to existing client
@@ -396,11 +499,8 @@ def get_link_suggestions(note_id: UUID, db: Session = Depends(get_db), current_u
 	# Check for phone number matches (if no client name but phone exists)
 	if phones and not client_names:
 		for phone in phones:
-			# Check if client with this phone already exists
-			existing_client = db.query(Client).filter(
-				Client.owner_id == current_user.id,
-				Client.phone == phone
-			).first()
+			# Check if client with this phone already exists (using normalized comparison)
+			existing_client = find_client_by_phone_normalized(db, current_user.id, phone)
 			
 			if existing_client:
 				suggestions.append(EntityLinkSuggestion(
@@ -488,11 +588,8 @@ def get_link_suggestions(note_id: UUID, db: Session = Depends(get_db), current_u
 				break  # Use the first valid client name
 			
 			if primary_client_name:
-				# Try to find the primary client in database
-				client = db.query(Client).filter(
-					Client.owner_id == current_user.id,
-					Client.name.ilike(f"%{primary_client_name}%")
-				).first()
+				# Try to find the primary client in database (using fuzzy matching)
+				client = find_client_by_name_fuzzy(db, current_user.id, primary_client_name, min_similarity=0.6)
 				if client:
 					client_id = client.id
 					logger.info(f"[link_suggestions] Found primary client '{primary_client_name}' in database: {client_id}")
@@ -535,32 +632,27 @@ def get_link_suggestions(note_id: UUID, db: Session = Depends(get_db), current_u
 						break  # Use the first valid client name
 					
 					if primary_client_name:
-						# Only use this client if it's the primary one
-						client = db.query(Client).filter(
-							Client.owner_id == current_user.id,
-							Client.name.ilike(f"%{primary_client_name}%")
-						).first()
+						# Only use this client if it's the primary one (using fuzzy matching)
+						client = find_client_by_name_fuzzy(db, current_user.id, primary_client_name, min_similarity=0.6)
 						if client:
 							potential_client_id = str(client.id)
 							logger.info(f"[link_suggestions] Found primary client '{primary_client_name}' for job suggestion: {potential_client_id}")
 				
 				# Only check phones if primary client not found
 				if not potential_client_id and phones:
-					# Match phone to primary client if possible
-					# For now, use first phone - but ideally match to primary client
+					# Match phone to primary client if possible (using normalized comparison)
 					for phone in phones:
-						client = db.query(Client).filter(
-							Client.owner_id == current_user.id,
-							Client.phone == phone
-						).first()
+						client = find_client_by_phone_normalized(db, current_user.id, phone)
 						if client:
-							# Only use if it matches primary client name
+							# Only use if it matches primary client name (fuzzy)
 							if client_names:
 								primary_name = next((n for n in client_names if n.lower() not in ['friday', 'friday the', 'monday', 'tuesday', 'wednesday', 'thursday', 'saturday', 'sunday']), None)
-								if primary_name and primary_name.lower() in client.name.lower():
-									potential_client_id = str(client.id)
-									logger.info(f"[link_suggestions] Found client by phone matching primary name: {potential_client_id}")
-									break
+								if primary_name:
+									# Use fuzzy matching to check if names match
+									if name_similarity(primary_name, client.name) >= 0.6 or primary_name.lower() in client.name.lower() or client.name.lower() in primary_name.lower():
+										potential_client_id = str(client.id)
+										logger.info(f"[link_suggestions] Found client by phone matching primary name (fuzzy): {potential_client_id}")
+										break
 							else:
 								# No client names, use phone match
 								potential_client_id = str(client.id)
@@ -642,3 +734,48 @@ def get_link_suggestions(note_id: UUID, db: Session = Depends(get_db), current_u
 		logger.info(f"[link_suggestions] Suggestion {i+1}: type={sug.type}, suggestion={sug.suggestion}, name={sug.name}, client_id={sug.client_id}, job_id={sug.existing_job_id}")
 	
 	return EntityLinkSuggestionsResponse(suggestions=suggestions)
+
+
+@router.delete("/{note_id}/nlp-cache", status_code=status.HTTP_200_OK)
+def clear_note_nlp_cache(note_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+	"""
+	Clear NLP cache for a specific note (for debugging).
+	This forces re-extraction of entities from the note's text using the latest NLP prompt.
+	"""
+	n = db.query(Note).filter(Note.id == note_id, Note.owner_id == current_user.id).first()
+	if not n:
+		raise HTTPException(status_code=404, detail="Note not found")
+	
+	if not n.text:
+		return {"message": "Note has no text to clear cache for", "keys_deleted": 0}
+	
+	try:
+		# Calculate the hash that would be used for caching
+		text_hash = hashlib.sha256(f"{n.text}:KE".encode()).hexdigest()
+		cache_key = f"nlp:extract:{text_hash}"
+		
+		# Clear the cache
+		redis_client = get_redis()
+		if redis_client.exists(cache_key):
+			redis_client.delete(cache_key)
+			logger.info(f"[NLP-Cache] 🗑️  Cleared NLP cache for note {note_id} (hash: {text_hash[:16]}...)")
+			return {
+				"message": "NLP cache cleared for note",
+				"note_id": str(note_id),
+				"text_hash": text_hash[:16] + "...",
+				"keys_deleted": 1
+			}
+		else:
+			logger.info(f"[NLP-Cache] ℹ️  No NLP cache found for note {note_id} (hash: {text_hash[:16]}...)")
+			return {
+				"message": "No NLP cache found for note",
+				"note_id": str(note_id),
+				"text_hash": text_hash[:16] + "...",
+				"keys_deleted": 0
+			}
+	except Exception as e:
+		logger.error(f"[NLP-Cache] Error clearing cache for note {note_id}: {e}", exc_info=True)
+		raise HTTPException(
+			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+			detail=f"Failed to clear cache: {str(e)}"
+		)

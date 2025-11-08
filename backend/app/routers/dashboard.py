@@ -80,13 +80,18 @@ def get_financial_dashboard(
 	else:
 		period_start = period_end - timedelta(days=30)
 	
-	# Get notes in date range
+	# Get notes in date range - ensure we only get notes for the current user
 	notes = db.query(Note).filter(
 		Note.owner_id == current_user.id,
 		Note.created_at >= period_start,
 		Note.created_at <= period_end,
 		Note.text.isnot(None)
 	).all()
+	
+	logger.info(
+		f"Financial dashboard query for user {current_user.id} - "
+		f"Found {len(notes)} notes in date range {period_start.date()} to {period_end.date()}"
+	)
 	
 	total_earnings = 0.0
 	total_expenses = 0.0
@@ -100,13 +105,25 @@ def get_financial_dashboard(
 		if not note.text:
 			continue
 		
+		# Verify note belongs to current user (double-check)
+		if note.owner_id != current_user.id:
+			logger.warning(f"Skipping note {note.id} - owner_id {note.owner_id} != current_user.id {current_user.id}")
+			continue
+		
 		# Extract entities using NLP (will use cache if available)
 		entities = extract_entities(note.text, "KE")
+		
+		# Log note processing for debugging
+		note_earnings = 0.0
+		note_expenses = 0.0
+		note_projected_earnings = 0.0
+		note_projected_expenses = 0.0
 		
 		# Process ACTUAL earnings
 		for earning_str in entities.earnings:
 			amount = extract_amount_value(earning_str)
 			total_earnings += amount
+			note_earnings += amount
 			
 			# Track by job type
 			if entities.job_types:
@@ -132,6 +149,7 @@ def get_financial_dashboard(
 		for expense_str in entities.expenses:
 			amount = extract_amount_value(expense_str)
 			total_expenses += amount
+			note_expenses += amount
 			
 			# Track by job type
 			if entities.job_types:
@@ -153,109 +171,24 @@ def get_financial_dashboard(
 						}
 					by_client[client_name]["expenses"] += amount
 		
-		# Process PROJECTED earnings (quotes, estimates)
-		for earning_str in entities.projected_earnings:
-			amount = extract_amount_value(earning_str)
-			total_projected_earnings += amount
-			
-			# Track by job type
-			if entities.job_types:
-				for job_type in entities.job_types:
-					if job_type not in by_job_type:
-						by_job_type[job_type] = {
-							"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-							"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-						}
-					by_job_type[job_type]["projected_earnings"] += amount
-			
-			# Track by client
-			if entities.client_names:
-				for client_name in entities.client_names:
-					if client_name not in by_client:
-						by_client[client_name] = {
-							"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-							"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-						}
-					by_client[client_name]["projected_earnings"] += amount
-		
-		# Process PROJECTED expenses (planned costs, estimates)
+		# Process PROJECTED expenses FIRST (planned costs, estimates)
+		# Filter out labor charges that LLM incorrectly categorized as expenses
+		note_projected_expenses = 0.0
+		labor_charges_from_expenses = []  # Track labor charges that were misclassified
 		for expense_str in entities.projected_expenses:
-			amount = extract_amount_value(expense_str)
-			total_projected_expenses += amount
-			
-			# Track by job type
-			if entities.job_types:
-				for job_type in entities.job_types:
-					if job_type not in by_job_type:
-						by_job_type[job_type] = {
-							"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-							"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-						}
-					by_job_type[job_type]["projected_expenses"] += amount
-			
-			# Track by client
-			if entities.client_names:
-				for client_name in entities.client_names:
-					if client_name not in by_client:
-						by_client[client_name] = {
-							"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-							"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-						}
-					by_client[client_name]["projected_expenses"] += amount
-		
-		# Also check amounts field for earnings (if not already in earnings/expenses/projected)
-		# This is a fallback - amounts might be earnings or expenses
-		for amount_str in entities.amounts:
-			# Skip if already categorized
-			if (amount_str in entities.earnings or amount_str in entities.expenses or 
-				amount_str in entities.projected_earnings or amount_str in entities.projected_expenses):
-				continue
-			
-			amount = extract_amount_value(amount_str)
-			note_lower = note.text.lower()
-			
-			# Heuristic: check if it's actual or projected
-			if any(word in note_lower for word in ["quote", "estimated", "will charge", "will cost", "adds to", "total will be"]):
-				# Projected
-				if any(word in note_lower for word in ["quote", "will charge", "estimated", "total will be"]):
-					total_projected_earnings += amount
-					if entities.job_types:
-						for job_type in entities.job_types:
-							if job_type not in by_job_type:
-								by_job_type[job_type] = {
-									"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-									"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-								}
-							by_job_type[job_type]["projected_earnings"] += amount
-					if entities.client_names:
-						for client_name in entities.client_names:
-							if client_name not in by_client:
-								by_client[client_name] = {
-									"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-									"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-								}
-							by_client[client_name]["projected_earnings"] += amount
-				elif any(word in note_lower for word in ["will cost", "adds to", "adds KES"]):
-					total_projected_expenses += amount
-					if entities.job_types:
-						for job_type in entities.job_types:
-							if job_type not in by_job_type:
-								by_job_type[job_type] = {
-									"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-									"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-								}
-							by_job_type[job_type]["projected_expenses"] += amount
-					if entities.client_names:
-						for client_name in entities.client_names:
-							if client_name not in by_client:
-								by_client[client_name] = {
-									"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
-									"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
-								}
-							by_client[client_name]["projected_expenses"] += amount
-			elif any(word in note_lower for word in ["paid", "received", "got paid", "they paid", "client paid"]):
-				# Actual earnings
-				total_earnings += amount
+			expense_lower = expense_str.lower()
+			# Check if this is actually a labor charge (common LLM mistake)
+			if any(phrase in expense_lower for phrase in ["labor charges", "labour charges", "labor fees", "labour fees", "charges will be", "charges are"]):
+				# This is a labor charge, not an expense - move it to earnings
+				amount = extract_amount_value(expense_str)
+				labor_charges_from_expenses.append(amount)
+			else:
+				# This is a legitimate projected expense
+				amount = extract_amount_value(expense_str)
+				total_projected_expenses += amount
+				note_projected_expenses += amount
+				
+				# Track by job type
 				if entities.job_types:
 					for job_type in entities.job_types:
 						if job_type not in by_job_type:
@@ -263,7 +196,9 @@ def get_financial_dashboard(
 								"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
 								"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
 							}
-						by_job_type[job_type]["earnings"] += amount
+						by_job_type[job_type]["projected_expenses"] += amount
+				
+				# Track by client
 				if entities.client_names:
 					for client_name in entities.client_names:
 						if client_name not in by_client:
@@ -271,7 +206,190 @@ def get_financial_dashboard(
 								"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
 								"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
 							}
-						by_client[client_name]["earnings"] += amount
+						by_client[client_name]["projected_expenses"] += amount
+		
+		# Fallback: Process uncategorized amounts to capture expenses that LLM missed
+		# This MUST run BEFORE calculating earnings from total quote
+		processed_amounts = set()
+		for earning_str in entities.earnings:
+			processed_amounts.add(extract_amount_value(earning_str))
+		for expense_str in entities.expenses:
+			processed_amounts.add(extract_amount_value(expense_str))
+		for earning_str in entities.projected_earnings:
+			processed_amounts.add(extract_amount_value(earning_str))
+		for expense_str in entities.projected_expenses:
+			processed_amounts.add(extract_amount_value(expense_str))
+		
+		# Process fallback amounts to capture uncategorized expenses
+		for amount_str in entities.amounts:
+			amount_value = extract_amount_value(amount_str)
+			# Skip if already categorized or zero
+			if amount_value in processed_amounts or amount_value == 0.0:
+				continue
+			
+			note_lower = note.text.lower()
+			amount_str_lower = amount_str.lower()
+			amount_pos = note_lower.find(amount_str_lower)
+			
+			# Get context around the amount (100 chars before and after)
+			if amount_pos >= 0:
+				context_start = max(0, amount_pos - 100)
+				context_end = min(len(note_lower), amount_pos + len(amount_str_lower) + 100)
+				context = note_lower[context_start:context_end]
+			else:
+				context = note_lower
+			
+			# EXCLUDE profit amounts - profit is calculated, not a separate earning/expense
+			if any(word in context for word in ["profit", "profit of", "made a profit", "profit after", "profit is"]):
+				# This is a profit amount, not an earning or expense - skip it
+				processed_amounts.add(amount_value)
+				continue
+			
+			# Check for expense indicators first
+			if any(word in context for word in ["will cost", "costs", "cost roughly", "cost about", "adds to", "adds kes"]):
+				# Projected expense - add to note_projected_expenses so it's included in earnings calculation
+				total_projected_expenses += amount_value
+				note_projected_expenses += amount_value
+				processed_amounts.add(amount_value)
+				if entities.job_types:
+					for job_type in entities.job_types:
+						if job_type not in by_job_type:
+							by_job_type[job_type] = {
+								"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+								"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+							}
+						by_job_type[job_type]["projected_expenses"] += amount_value
+				if entities.client_names:
+					for client_name in entities.client_names:
+						if client_name not in by_client:
+							by_client[client_name] = {
+								"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+								"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+							}
+						by_client[client_name]["projected_expenses"] += amount_value
+			elif any(word in context for word in ["spent", "paid for"]):
+				# Actual expense
+				total_expenses += amount_value
+				note_expenses += amount_value
+				processed_amounts.add(amount_value)
+				if entities.job_types:
+					for job_type in entities.job_types:
+						if job_type not in by_job_type:
+							by_job_type[job_type] = {
+								"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+								"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+							}
+						by_job_type[job_type]["expenses"] += amount_value
+				if entities.client_names:
+					for client_name in entities.client_names:
+						if client_name not in by_client:
+							by_client[client_name] = {
+								"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+								"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+							}
+						by_client[client_name]["expenses"] += amount_value
+			elif any(word in context for word in ["paid", "received", "got paid", "they paid", "client paid", "gave me", "deposit"]):
+				# Actual earnings - but only if not in a profit context
+				# Check if this amount is mentioned in a profit calculation context
+				profit_context_words = ["profit", "profit of", "made a profit", "profit after", "profit is"]
+				if not any(word in context for word in profit_context_words):
+					total_earnings += amount_value
+					note_earnings += amount_value
+					processed_amounts.add(amount_value)
+					if entities.job_types:
+						for job_type in entities.job_types:
+							if job_type not in by_job_type:
+								by_job_type[job_type] = {
+									"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+									"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+								}
+							by_job_type[job_type]["earnings"] += amount_value
+					if entities.client_names:
+						for client_name in entities.client_names:
+							if client_name not in by_client:
+								by_client[client_name] = {
+									"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+									"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+								}
+							by_client[client_name]["earnings"] += amount_value
+				else:
+					# Profit amount - mark as processed but don't add to earnings
+					processed_amounts.add(amount_value)
+			# Note: We don't add uncategorized amounts to projected_earnings here
+			# because they might be part of a total quote, which we handle below
+		
+		# NOW calculate projected earnings AFTER fallback has captured all expenses
+		# Process PROJECTED earnings (quotes, estimates)
+		# If we have total quote, use quote - expenses (profit)
+		# If we have labor charges but no total quote, use labor charges
+		# Otherwise, use what the LLM extracted
+		total_quote_amount = None
+		labor_charges_amount = None
+		other_projected_earnings = []
+		
+		# Include labor charges that were incorrectly categorized as expenses
+		for amount in labor_charges_from_expenses:
+			if labor_charges_amount is None:
+				labor_charges_amount = amount
+			else:
+				# If we already have labor charges, add to other earnings
+				other_projected_earnings.append(amount)
+		
+		for earning_str in entities.projected_earnings:
+			earning_lower = earning_str.lower()
+			amount = extract_amount_value(earning_str)
+			
+			# Check if this is a "total quote" (includes everything: materials + labor)
+			# Also check for variations like "total pot", "total cut" (transcription errors)
+			if any(phrase in earning_lower for phrase in ["total quote", "quote is", "quote to", "total will be", "revised quote", "updated quote", "total pot", "total cut"]):
+				total_quote_amount = amount
+			# Check if this is labor charges (the actual earnings/profit)
+			elif any(phrase in earning_lower for phrase in ["labor charges", "labour charges", "labor fees", "labour fees", "charges will be", "charges are"]):
+				labor_charges_amount = amount
+			else:
+				# Other projected earnings
+				other_projected_earnings.append(amount)
+		
+		# Calculate projected earnings: if we have total quote, use quote - expenses (profit)
+		# If we have labor charges but no total quote, use labor charges
+		# Otherwise, use other projected earnings
+		if total_quote_amount is not None:
+			# We have a total quote - earnings = quote - expenses (profit after material costs)
+			# note_projected_expenses now includes fallback amounts
+			projected_earnings_for_note = total_quote_amount - note_projected_expenses
+			if projected_earnings_for_note < 0:
+				projected_earnings_for_note = 0.0
+		elif labor_charges_amount is not None:
+			# No total quote, but we have labor charges - use labor charges as earnings
+			projected_earnings_for_note = labor_charges_amount
+		else:
+			# No total quote or labor charges, use other projected earnings
+			projected_earnings_for_note = sum(other_projected_earnings)
+		
+		# Add calculated earnings to totals
+		if projected_earnings_for_note > 0:
+			total_projected_earnings += projected_earnings_for_note
+			note_projected_earnings += projected_earnings_for_note
+			
+			# Track by job type
+			if entities.job_types:
+				for job_type in entities.job_types:
+					if job_type not in by_job_type:
+						by_job_type[job_type] = {
+							"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+							"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+						}
+					by_job_type[job_type]["projected_earnings"] += projected_earnings_for_note
+			
+			# Track by client
+			if entities.client_names:
+				for client_name in entities.client_names:
+					if client_name not in by_client:
+						by_client[client_name] = {
+							"earnings": 0.0, "expenses": 0.0, "profit": 0.0,
+							"projected_earnings": 0.0, "projected_expenses": 0.0, "projected_profit": 0.0
+						}
+					by_client[client_name]["projected_earnings"] += projected_earnings_for_note
 	
 	# Calculate profits
 	net_profit = total_earnings - total_expenses

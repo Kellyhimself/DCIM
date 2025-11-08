@@ -9,6 +9,7 @@ import '../core/app_theme.dart';
 import 'voice_capture_screen.dart';
 import 'clients_screen.dart';
 import 'root_shell.dart';
+import 'accounts_screen.dart';
 
 class HomeScreen extends StatefulWidget {
 	const HomeScreen({super.key});
@@ -252,7 +253,20 @@ class _HomeScreenState extends State<HomeScreen> {
 	@override
 	Widget build(BuildContext context) {
 		return Scaffold(
-			appBar: AppBar(title: const Text('Second Brain')),
+			appBar: AppBar(
+				title: const Text('Second Brain'),
+				actions: [
+					IconButton(
+						icon: const Icon(Icons.account_circle_outlined),
+						onPressed: () {
+							Navigator.of(context).push(
+								MaterialPageRoute(builder: (_) => const AccountsScreen()),
+							);
+						},
+						tooltip: 'Account Settings',
+					),
+				],
+			),
 			body: _loading
 					? const Center(child: CircularProgressIndicator())
 					: _error != null
@@ -313,59 +327,14 @@ class _HomeScreenState extends State<HomeScreen> {
 										final n = _notes[i] as Map<String, dynamic>;
 										final id = n['id'] as String;
 										final status = (n['status'] as String?) ?? '';
-										return Card(
-											margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
-											child: ListTile(
-												title: Text(
-													n['text'] ?? '(no text)',
-													style: Theme.of(context).textTheme.bodyLarge,
-												),
-												subtitle: Row(
-													children: [
-														if (status == 'done')
-															Container(
-																padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-																decoration: BoxDecoration(
-																	color: AppColors.emerald.withOpacity(0.1),
-																	borderRadius: BorderRadius.circular(12),
-																),
-																child: Text(
-																	'Done',
-																	style: TextStyle(
-																		color: AppColors.emerald,
-																		fontSize: 12,
-																		fontWeight: FontWeight.w600,
-																	),
-																),
-															)
-														else
-															Text(
-																'Status: $status',
-																style: Theme.of(context).textTheme.bodySmall,
-															),
-													],
-												),
-												trailing: Wrap(spacing: 8, children: [
-													IconButton(
-														onPressed: () => _extractReminders(id),
-														icon: const Icon(Icons.notifications_outlined),
-														tooltip: 'Extract reminders',
-														color: AppColors.warmAmber,
-													),
-													IconButton(
-														onPressed: () => _shareNote(id),
-														icon: const Icon(Icons.ios_share),
-														tooltip: 'Share',
-														color: AppColors.softCoral,
-													),
-													IconButton(
-														onPressed: status == 'done' ? null : () => _markDone(id),
-														icon: const Icon(Icons.check_circle_outline),
-														tooltip: 'Mark done',
-														color: status == 'done' ? AppColors.slateGrey : AppColors.emerald,
-													),
-												]),
-											),
+										final noteText = n['text'] ?? '(no text)';
+										return _NoteCard(
+											noteId: id,
+											noteText: noteText,
+											status: status,
+											onExtractReminders: () => _extractReminders(id),
+											onShare: () => _shareNote(id),
+											onMarkDone: status == 'done' ? null : () => _markDone(id),
 										);
 													},
 													separatorBuilder: (_, __) => const Divider(height: 1),
@@ -387,6 +356,149 @@ class _HomeScreenState extends State<HomeScreen> {
 				},
 				label: const Text('Record Note'),
 				icon: const Icon(Icons.mic),
+			),
+		);
+	}
+}
+
+class _NoteCard extends StatefulWidget {
+	final String noteId;
+	final String noteText;
+	final String status;
+	final VoidCallback onExtractReminders;
+	final VoidCallback onShare;
+	final VoidCallback? onMarkDone;
+
+	const _NoteCard({
+		required this.noteId,
+		required this.noteText,
+		required this.status,
+		required this.onExtractReminders,
+		required this.onShare,
+		this.onMarkDone,
+	});
+
+	@override
+	State<_NoteCard> createState() => _NoteCardState();
+}
+
+class _NoteCardState extends State<_NoteCard> {
+	bool _expanded = false;
+
+	@override
+	Widget build(BuildContext context) {
+		final isLongText = widget.noteText.length > 100;
+		final displayText = _expanded || !isLongText
+			? widget.noteText
+			: '${widget.noteText.substring(0, 100)}...';
+
+		return Card(
+			margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+			child: Column(
+				crossAxisAlignment: CrossAxisAlignment.start,
+				children: [
+					Padding(
+						padding: const EdgeInsets.all(12),
+						child: Column(
+							crossAxisAlignment: CrossAxisAlignment.start,
+							children: [
+								Row(
+									children: [
+										if (widget.status == 'done')
+											Container(
+												padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+												decoration: BoxDecoration(
+													color: AppColors.emerald.withOpacity(0.1),
+													borderRadius: BorderRadius.circular(12),
+												),
+												child: Text(
+													'Done',
+													style: TextStyle(
+														color: AppColors.emerald,
+														fontSize: 12,
+														fontWeight: FontWeight.w600,
+													),
+												),
+											)
+										else if (widget.status.isNotEmpty)
+											Container(
+												padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+												decoration: BoxDecoration(
+													color: AppColors.warmAmber.withOpacity(0.1),
+													borderRadius: BorderRadius.circular(12),
+												),
+												child: Text(
+													widget.status,
+													style: TextStyle(
+														color: AppColors.warmAmber,
+														fontSize: 12,
+														fontWeight: FontWeight.w600,
+													),
+												),
+											),
+										const Spacer(),
+										if (isLongText)
+											TextButton(
+												onPressed: () {
+													setState(() => _expanded = !_expanded);
+												},
+												child: Text(
+													_expanded ? 'Show less' : 'Show more',
+													style: TextStyle(fontSize: 12),
+												),
+											),
+									],
+								),
+								const SizedBox(height: 8),
+								Text(
+									displayText,
+									style: Theme.of(context).textTheme.bodyMedium,
+								),
+							],
+						),
+					),
+					Divider(height: 1),
+					Padding(
+						padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+						child: Row(
+							children: [
+								Expanded(
+									child: TextButton.icon(
+										onPressed: widget.onExtractReminders,
+										icon: const Icon(Icons.notifications_outlined, size: 18),
+										label: const Text('Reminders'),
+										style: TextButton.styleFrom(
+											foregroundColor: AppColors.warmAmber,
+										),
+									),
+								),
+								Expanded(
+									child: TextButton.icon(
+										onPressed: widget.onShare,
+										icon: const Icon(Icons.ios_share, size: 18),
+										label: const Text('Share'),
+										style: TextButton.styleFrom(
+											foregroundColor: AppColors.softCoral,
+										),
+									),
+								),
+								Expanded(
+									child: TextButton.icon(
+										onPressed: widget.onMarkDone,
+										icon: Icon(
+											widget.status == 'done' ? Icons.check_circle : Icons.check_circle_outline,
+											size: 18,
+										),
+										label: Text(widget.status == 'done' ? 'Done' : 'Mark Done'),
+										style: TextButton.styleFrom(
+											foregroundColor: widget.status == 'done' ? AppColors.slateGrey : AppColors.emerald,
+										),
+									),
+								),
+							],
+						),
+					),
+				],
 			),
 		);
 	}

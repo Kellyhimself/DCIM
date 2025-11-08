@@ -980,7 +980,21 @@ class _VoiceCaptureScreenState extends State<VoiceCaptureScreen> {
 															icon = Icons.link;
 															color = AppColors.softCoral;
 														} else {
-															label = 'Create job: ${suggestion['location'] ?? suggestion['name'] ?? ""}';
+															// Use name if available (already formatted as "job_type - location")
+															// Otherwise construct from job_type and location
+															final jobType = suggestion['job_type'] as String?;
+															final location = suggestion['location'] as String?;
+															if (suggestion['name'] != null && (suggestion['name'] as String).isNotEmpty) {
+																label = suggestion['name'] as String;
+															} else if (jobType != null && location != null) {
+																label = '$jobType - $location';
+															} else if (jobType != null) {
+																label = jobType;
+															} else if (location != null) {
+																label = location;
+															} else {
+																label = 'New job';
+															}
 															icon = Icons.work_outline;
 															color = AppColors.softCoral;
 														}

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
+import logging
 
 from backend.app.db import get_db
 from backend.app.models import Client, User
@@ -9,6 +10,7 @@ from backend.app.schemas import ClientCreate, ClientOut
 from backend.app.deps import get_current_user
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=ClientOut)
@@ -23,6 +25,28 @@ def create_client(payload: ClientCreate, db: Session = Depends(get_db), current_
 @router.get("", response_model=List[ClientOut])
 def list_clients(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
 	return db.query(Client).filter(Client.owner_id == current_user.id).order_by(Client.created_at.desc()).all()
+
+
+# IMPORTANT: /all routes must be defined BEFORE /{id} routes to avoid routing conflicts
+@router.delete("/all", status_code=status.HTTP_200_OK)
+def delete_all_clients(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+	"""
+	Delete all clients for the current user.
+	This will cascade delete associated jobs and notes (via foreign key constraints).
+	"""
+	clients = db.query(Client).filter(Client.owner_id == current_user.id).all()
+	count = len(clients)
+	
+	for client in clients:
+		db.delete(client)
+	
+	db.commit()
+	logger.info(f"Deleted {count} clients for user {current_user.id}")
+	
+	return {
+		"message": f"Deleted {count} clients",
+		"count": count
+	}
 
 
 @router.get("/{client_id}", response_model=ClientOut)

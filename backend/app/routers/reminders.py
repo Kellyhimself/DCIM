@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -75,6 +75,29 @@ def list_reminders(
 	
 	reminders = query.order_by(Reminder.due_date.asc().nulls_last(), Reminder.created_at.desc()).limit(limit).all()
 	return reminders
+
+
+@router.delete("/all", status_code=status.HTTP_200_OK)
+def delete_all_reminders(
+	db: Session = Depends(get_db),
+	current_user: User = Depends(get_current_user)
+):
+	"""
+	Delete all reminders for the current user.
+	"""
+	reminders = db.query(Reminder).filter(Reminder.owner_id == current_user.id).all()
+	count = len(reminders)
+	
+	for reminder in reminders:
+		db.delete(reminder)
+	
+	db.commit()
+	logger.info(f"Deleted {count} reminders for user {current_user.id}")
+	
+	return {
+		"message": f"Deleted {count} reminders",
+		"count": count
+	}
 
 
 @router.post("", response_model=ReminderResponse, status_code=201)
